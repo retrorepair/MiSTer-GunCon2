@@ -1,0 +1,4 @@
+# patches must stay byte-exact; shell and python scripts must keep LF (they run in WSL / on the MiSTer)
+*.patch -text
+*.sh text eol=lf
+*.py text eol=lf
