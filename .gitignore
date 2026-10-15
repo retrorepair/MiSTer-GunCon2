@@ -1,0 +1,5 @@
+# Upstream reference checkouts / downloads (re-create with scripts/fetch-refs.sh)
+/GunCon2-MiSTer/
+/Main_MiSTer/
+/Linux-Kernel_MiSTer-guncon2/
+/core-refs/
