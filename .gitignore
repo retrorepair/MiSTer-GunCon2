@@ -3,3 +3,5 @@
 /Main_MiSTer/
 /Linux-Kernel_MiSTer-guncon2/
 /core-refs/
+build/
+captures/fake_*
