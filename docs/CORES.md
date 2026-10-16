@@ -11,16 +11,37 @@ How to read the columns:
 - **Aim**: `flash` = the pointer is set from the game's flash after a trigger pull; `live` = the pointer follows the gun (`LIGHTGUN_CRT_MODE=0`; no core uses it by default).
 - **Tested**: "on hardware" means a person shot the real gun at the real game. Everything else is derived and not yet proven.
 
-| Core | Source | Video (measured) | HSync | Aim | Buttons | Tested |
+| Game (core's own name) | Source | Picture (measured) | HSync / VSync | Picture edges, gun raw | Buttons (see below) | Tested |
 |---|---|---|---|---|---|---|
-| Namco NB-1 (Point Blank) | `kyledlester/Namco_NB1_MiSTer` | 288x224, 15 kHz progressive | 32 px at 6.048 MHz | flash | trigger 4, A start, B coin, Select service | **on hardware, "basically perfect"** |
-| Sega Model 2 (Virtua Cop) | `alphanu1/sega-model2-mister` (release `Model2_20261016`) | 496x384 **interlaced**, 63.55 us lines, 48.06 us picture | 64 px (6.2 us) | flash | trigger 4, gun Start = Reload 5, A = Start 6, B = Coin 7, Select = Service 9 | map and timing: yes. Aiming at the game: not yet, needs the full ROM set and a played game |
-| Namco Super System 22 (Time Crisis) | binary only (see below) | 640x480 **interlaced**, 63.58 us lines, 50 us picture | unknown, 4.7 us assumed | flash | **no map written**: see below | not yet |
+| Point Blank (NB1) | `kyledlester/Namco_NB1_MiSTer` | 288x224 progressive | 32 px / 3 lines | x 148..712, y 30..250 | trigger 4, A Start, B Coin, Select Service | **on hardware, "basically perfect"** |
+| Virtua Cop (Model2) | `alphanu1/sega-model2-mister` | 496x384 **interlaced**, 15.7 kHz | 64 px / 3 | x 159..729, y 47..235 | trigger, A Reload, B Start, gun Start Coin | map and timing yes; shooting needs the full ROM set |
+| Time Crisis (SUPER22) | binary only | 640x480 **interlaced** | **unknown**, 4.7 us / 3 assumed | x 131..724, y 20..256 | trigger, A Pedal, B Start, gun Start Coin | not yet |
+| Lethal Enforcers II (KonamiGX) | `ppriest/Arcade-KonamiGX_MiSTer` | 288x224 | 32 px / 8 (estimate) | x 163..731, y 26..246 | trigger, A Reload, B Start, gun Start Coin | not yet |
+| Alien3 / Jurassic Park (S32) | `meathax/s32` | 320x224 | 32 px / 3 | x 124..713, y 31..251 | trigger, A (Alien3: second button), B Start, gun Start Coin | not yet |
+| Line of Fire (SXB) | `MiSTer-devel/Arcade-SegaXBoard_MiSTer` | 320x224 | 32 px / 4 | x 124..731, y 24..244 | trigger, A Bomb, B Start, gun Start Coin | not yet |
+| Point Blank 2 (SYSTEM11) | `XelaNotPu/SYSTEM11_MiSTer` | 352x240 | 4.69 us / 3 | x 115..736, y 21..257 | trigger, A Start, B Coin | not yet |
+| Terminator 2 (A.YUNIT) | closed (blahm1d) | 410x256 | **unknown**, 4.7 us assumed | x 130..737, y 22..273 | trigger, A Bomb, B Start, gun Start Coin | not yet |
+| Rambo III (TaitoB) | `Mezzow/Arcade-TaitoB_MiSTer` | 320x224 | **64 px = 9.4 us** / 3 | x 174..732, y 27..247 | trigger, A Button 2, B Start, gun Start Coin | not yet |
+| Laser Ghost (JTS18) | `jotego/jtcores` | 320x224 | unknown, 4.7 us assumed | x 122..753, y 24..244 | trigger, A Special Weapon, B Start, gun Start Coin | not yet |
+| Operation Wolf (JTRASTAN) | `jotego/jtcores` | 320x240 | unknown, 4.7 us assumed | x 144..712, y 19..255 | trigger, A Grenade, B Start, gun Start Coin | not yet |
+
+"Picture edges" is what the universal mapping derives for the gun's raw X and Y at the picture's left/right/top/bottom, from the
+GunCal calibration of 2026-10-16 plus the timing in `captures/harvest/round3.txt`. **HSync / VSync** come from each core's source and
+are what the framework cannot measure; "unknown" falls back to 4.7 us and 3 lines, which can be a few percent of the screen out in
+X. A per-core F10 calibration on the MiSTer overrides all of this.
+
+**Buttons.** Every gun game's map is in `config/inputs/<game>_input_0b9a_016a_v3.map` on the card (written by
+`tools/mister/make_gun_map.py` from the MRA's own `<buttons>` list). The layout: **trigger -> the first button**, **A -> the game's
+second action** (reload, bomb, grenade, pedal), **B -> Start**, the gun's **Start -> Coin**, **Select -> Service**. Games with only
+one action (Point Blank, Point Blank 2, Jurassic Park) keep the layout you tested: **A -> Start, B -> Coin**.
+
+**Y beyond 255.** The kernel driver keeps only the low byte of the gun's Y (see DESIGN.md), so rows past raw Y 255 cannot be reached:
+Terminator 2's bottom 18 lines, the last 1 or 2 of Time Crisis and Point Blank 2. Not caused by the mapping.
 
 ## Sega Model 2 (Virtua Cop)
 
 The core takes a gun as `joystick_l_analog_N` (an absolute position, -127..+127 across the **whole 496x384 game screen**) and the
-trigger as joystick button 4. Player 1's buttons are joystick bits 4..9 (Trigger, Reload, Start, Coin, Test, Service). Reload is by
+trigger as joystick button 4. Player 1's buttons are joystick bits 4..9 (Trigger, Reload, Start, Coin, Test, Service); the map is trigger -> Trigger, A -> Reload, B -> Start, gun Start -> Coin, Select -> Service. Reload is by
 shooting off-screen (the outer 5% of the range), or the Reload button. Set the core's OSD `Crosshair` to `Off` with a real gun.
 
 The aim is taken from the game's flash, as for Point Blank. Virtua Cop flashes in gameplay (not in the attract demo), so the flash
@@ -47,11 +68,10 @@ The card has `XNSUPER22_20260913.rbf` and `Time Crisis (World, TS2 Ver.B).mra` (
 M37710 ADC path, a bring-up state). There is no public source for that build (Patreon). `spacestate1/Arcade_namco22_MiSTer` is a
 related public GPL-3.0 research core for the same hardware: Prop Cycle runs, Time Crisis is not loadable there, no sound, ~6 fps.
 
-The card's build lists these buttons (`J1`): `Gas, Brake, Shift Up, Shift Down, View, Coin, Service, Test, Motion Stop, Pause` (bits 4..13),
-and `jn,A,B,R,L,X,Select`: a racing layout, and the Time Crisis MRA defines no `<buttons>`. MAME has the gun trigger on BUTTON1 and the
-foot pedal on BUTTON2, but which of these two the build wires them to is not in anything I can read, so **no map was written**. Once
-known, one command on the MiSTer writes it: `python3 /tmp/make_gun_map.py timecris <trigger bit> <A> <B> <Select> <Start>` (and the same for
-`SUPER22`, the name the core reports early).
+The core's own list (`J1`) is a racing layout (`Gas, Brake, Shift Up, ...`), but the Time Crisis MRA renames the buttons:
+`Trigger, Pedal, Start, -, -, Coin, Service, Test, -, Pause`. The map written for `timecris` and `SUPER22` is trigger -> Trigger,
+A -> Pedal, B -> Start, gun Start -> Coin, Select -> Service. (An earlier version of this file said the MRA defined no
+buttons: that was wrong. I had only read the first and last few KB of the 2.5 MB file.)
 
 Measured on the card's build: 640x480 interlaced; 15.7 kHz lines, so the GunCon 2 can lock. The mapping handles the interlace (the picture
 spans 240 gun lines), and puts the picture at raw x 131..724 and y 20..256. The bottom edge sits at the kernel driver's 8-bit

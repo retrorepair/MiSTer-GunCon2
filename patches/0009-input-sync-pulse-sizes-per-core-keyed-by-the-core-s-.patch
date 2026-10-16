@@ -1,0 +1,112 @@
+From 4f216cd456b28ceef841da484928b8f8ee564548 Mon Sep 17 00:00:00 2001
+From: retrorepair <joelwhybrow@googlemail.com>
+Date: Sat, 17 Oct 2026 00:30:24 +0100
+Subject: [PATCH] input: sync pulse sizes per core, keyed by the core's own
+ name
+
+Replaces the chain of game-name prefix tests. MiSTer names an arcade game by its
+MRA set name, which says nothing about the board: "ptblank2a" (System 11) was
+matched by the NB-1 entry for "ptblank*", and each game of a core needed its
+own line. The table is keyed by the core's own name (first config-string field)
+and holds the HSync width (pixels of the core's dot clock, or a time) and the
+VSync length in lines, each read from that core's source:
+
+  NB1 32 px / 3, Model2 64 px / 3, SXB 32 px / 4, S32 32 px / 3, TaitoB 64 px / 3,
+  SYSTEM11 4.69 us / 3, KonamiGX 32 px / 8 (the game programs it), NES 4.65 us / 3.
+
+The video log now names both ("alien3 [S32]").
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ input.cpp | 51 ++++++++++++++++++++++++++++++++++++++++-----------
+ 1 file changed, 40 insertions(+), 11 deletions(-)
+
+diff --git a/input.cpp b/input.cpp
+index fa5fb3f..c6c7344 100644
+--- a/input.cpp
++++ b/input.cpp
+@@ -2102,6 +2102,30 @@ static void gundbg_log_out(int dev, const crtgun_state *st, uint32_t t_ms)
+ 
+ static crtgun_state crtgun[NUMDEV];
+ 
++// Sync pulse sizes per core, from each core's source: the framework measures where the picture starts after a sync pulse but
++// not how wide the pulse is, and the gun counts from the START of it. Keyed by the core's own name (the first field of its
++// config string), so every game on the core gets it; MiSTer's name for an arcade game is its MRA set name, which says nothing
++// about the board. hs_px is a width in the core's dot clock (taken from the measured picture time per pixel), otherwise hs_ns.
++struct guncal_sync_entry
++{
++	const char *board;
++	double      hs_px;
++	double      hs_ns;
++	int         vs_lines;
++	const char *source;
++};
++static const guncal_sync_entry guncal_sync_table[] =
++{
++	{ "NB1",      32, 0,   3, "Namco NB-1 core: 32 px at 6.048 MHz, 3 lines" },
++	{ "Model2",   64, 0,   3, "Sega Model 2 core: m2_video_timing.sv H_SYNC_END - H_SYNC_START, VI_SYNC_END - VI_SYNC_START" },
++	{ "SXB",      32, 0,   4, "Sega X Board core: xb_video_timing.sv HS_START..HS_END, VS_START..VS_END" },
++	{ "S32",      32, 0,   3, "Sega System 32 core: s32_video.sv hsync hdisp+24..hdisp+56, vsync 3 lines" },
++	{ "TaitoB",   64, 0,   3, "Taito B core: taitob_video_timing.sv; jtframe_resync keeps the pulse length" },
++	{ "SYSTEM11", 0, 4690, 3, "Namco System 11 core: PSX GPU, 252 clocks of 53.693 MHz, 3 lines" },
++	{ "KonamiGX", 32, 0,   8, "Konami GX core: the K053252 pulse is set by the game; this is what daiskiss writes (Lethal Enforcers II not checked)" },
++	{ "NES",      0, 4650, 3, "NES core: 25 dots at 5.37 MHz" },
++};
++
+ // Record what the framework measured of the running core's video (one line per change). This is what the mapping below
+ // is derived from, and the only way to see why it was skipped for a core (interlaced, incomplete, out of range).
+ static void guncal_log_video(const char *core, const VideoInfo *v)
+@@ -2138,10 +2162,13 @@ static void guncal_apply_universal(int i)
+ {
+ 	if (!input[i].uni_valid || input[i].guncal_file) return;
+ 
+-	const char *core = user_io_get_core_name();
++	const char *core = user_io_get_core_name();      // an arcade game's MRA set name once loaded, else the core's own name
++	const char *board = user_io_get_core_name(1);    // the core's own name
+ 	if (!strcmp(core, "GUNCAL")) return;
+ 
+-	guncal_log_video(core, &current_video_info);
++	char label[96];
++	snprintf(label, sizeof(label), "%s [%s]", core, board);
++	guncal_log_video(label, &current_video_info);
+ 
+ 	const VideoInfo *v = &current_video_info;
+ 	if (!v->width || !v->height || !v->htime || !v->ptime || !v->vtime || (!v->frame_clocks && !v->ctime)) return;
+@@ -2160,17 +2187,19 @@ static void guncal_apply_universal(int i)
+ 	t.height    = v->height;
+ 	t.interlaced = v->interlaced;
+ 
+-	// The framework does not measure the sync pulse widths: the usual 15 kHz values unless the core is known. MiSTer reports
+-	// an arcade core by its MRA set name or, early in the load, by the core's own name.
++	// The usual 15 kHz values unless the core's source says otherwise (guncal_sync_table).
+ 	t.hs_ns = 4700.0;
+ 	t.vs_lines = 3;
+-	if (!strncasecmp(core, "ptblank", 7) || !strncasecmp(core, "gunbulet", 8) || !strcasecmp(core, "NB1")) t.hs_ns = 32 * 165.3;   // NB-1 core: 32 px at 6.048 MHz
+-	else if (!strcasecmp(core, "NES")) t.hs_ns = 4650.0;                                                                           // 25 dots at 5.37 MHz
+-	// Sega Model 2 core: HSync is 64 pixels (m2_video_timing.sv H_SYNC_END - H_SYNC_START) in every video mode, native and 15 kHz
+-	else if (!strcasecmp(core, "Model2") || !strncasecmp(core, "vcop", 4) || !strncasecmp(core, "daytona", 7) || !strcasecmp(core, "desert")) t.hs_ns = 64.0 * t.active_ns / t.width;
++	for (const guncal_sync_entry *se = guncal_sync_table; se < guncal_sync_table + sizeof(guncal_sync_table) / sizeof(*guncal_sync_table); se++)
++	{
++		if (strcasecmp(board, se->board)) continue;
++		t.hs_ns = se->hs_px ? se->hs_px * t.active_ns / t.width : se->hs_ns;
++		t.vs_lines = se->vs_lines;
++		break;
++	}
+ 
+ 	// recompute when the measured timing or the assumed pulse width changes (the core name can change while a core starts)
+-	uint32_t sig = v->width * 31u + v->height * 17u + v->htime * 13u + v->ptime * 7u + v->de_h * 5u + v->de_v * 3u + v->frame_clocks + v->ctime * 23u + (v->interlaced ? 1u : 0u) + (uint32_t)t.hs_ns * 11u;
++	uint32_t sig = v->width * 31u + v->height * 17u + v->htime * 13u + v->ptime * 7u + v->de_h * 5u + v->de_v * 3u + v->frame_clocks + v->ctime * 23u + (v->interlaced ? 1u : 0u) + (uint32_t)t.hs_ns * 11u + (uint32_t)t.vs_lines * 29u;
+ 	if (sig == input[i].uni_sig) return;
+ 	input[i].uni_sig = sig;
+ 
+@@ -2186,8 +2215,8 @@ static void guncal_apply_universal(int i)
+ 		FILE *lf = fopen("/tmp/guncal_apply.log", "a");
+ 		if (lf)
+ 		{
+-			fprintf(lf, "%s: picture %dx%d%s active %.0f ns, hs %.0f ns, de_h %.0f ns, de_v %d -> raw x %d..%d, y %d..%d\n",
+-				core, t.width, t.height, t.interlaced ? " interlaced" : "", t.active_ns, t.hs_ns, t.de_h_ns, t.de_v, e[2], e[3], e[0], e[1]);
++			fprintf(lf, "%s: picture %dx%d%s active %.0f ns, hs %.0f ns (vs %d lines), de_h %.0f ns, de_v %d -> raw x %d..%d, y %d..%d\n",
++				label, t.width, t.height, t.interlaced ? " interlaced" : "", t.active_ns, t.hs_ns, t.vs_lines, t.de_h_ns, t.de_v, e[2], e[3], e[0], e[1]);
+ 			fclose(lf);
+ 		}
+ 	}

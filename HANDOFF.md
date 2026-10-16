@@ -21,7 +21,7 @@
 ## What is on the MiSTer (192.168.1.204, UART on COM3)
 
 RAM only, a reboot returns to stock:
-- `/tmp/dbg/MiSTer15` = patched app (build/MiSTer_tracker_debug, md5 46e2e2e1...) bind-mounted over `/media/fat/MiSTer`.
+- `/tmp/dbg/MiSTer16` = patched app, patches 0001..0009 (build/MiSTer_tracker_debug, md5 dd89f3a7...) bind-mounted over `/media/fat/MiSTer`.
 - `/tmp/dbg/Model2_20261016.rbf` (md5 644e28fa...) bind-mounted over `/media/fat/_Arcade/cores/Model2.rbf`, so MRAs that name `Model2`
   get the newer core. The original `Model2.rbf` on the card is untouched underneath.
 - `/tmp/archive/*` earlier logs (Point Blank, Time Crisis probes, Model 2 probes). `/tmp/guncal_apply.log` is the live timing log.
@@ -29,8 +29,9 @@ RAM only, a reboot returns to stock:
 Written to the SD card (the only persistent changes this session; the stock `MiSTer` binary is untouched):
 - `config/GUNCAL_uni_0b9a_016a_v1.cfg` (+ `.3pt.bak`, `GUNCAL_log.txt`): the user's universal calibration.
 - `config/inputs/{ptblanka,NB1,NES}_input_0b9a_016a_v3.map`: gun buttons for Point Blank and NES.
-- `config/inputs/{vcopa,vcop,Model2}_input_0b9a_016a_v3.map` (new): trigger -> Trigger, gun Start -> Reload, A -> Start, B -> Coin,
-  Select -> Service.
+- `config/inputs/<game>_input_0b9a_016a_v3.map` (new, one per gun game found on the card: vcopa, vcop, Model2, le2, alien3, jpark,
+  loffire, ptblank2a, term2, rambo3, lghost, opwolf, timecris): the GunCon 2's buttons onto the game's own button list. Layout and
+  rationale in `docs/CORES.md`. Written by `tools/mister/make_gun_map.py`, which refuses to overwrite.
 - `_Arcade/_gun_test/` (new folder) with two MRAs from the Model 2 release: `Daytona USA (Revision A) [15kHz CRT].mra` and
   `Virtua Cop (Revision A) [15kHz CRT].mra`. Delete the folder to undo. (`load_core` only takes MRAs under `/media/fat`.)
 

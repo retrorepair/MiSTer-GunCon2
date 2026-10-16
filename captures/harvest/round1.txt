@@ -1,0 +1,45 @@
+=== /media/fat/_Arcade/Lethal Enforcers II - Gun Fighters (ver EAA).mra
+le2
+/media/fat/MiSTer /media/fat/_Arcade/cores/KonamiGX_20261005.rbf /media/fat/_Arcade/Lethal Enforcers II - Gun Fighters (ver EAA).mra
+/media/fat/games/mame#
+--- log
+le2: video 0x0 htime 0 ptime 0 vtime 0 ctime 0 frame_clocks 0 de_h 0 de_v 0
+le2: confstr[27] J1,Button 1,Button 2,Button 3,Button 4,Button 5,Button 6,Start,Coin,Pause,Service
+le2: confstr[28] jn,A,B,X,-,-,-,Start,Select,L,R
+le2: video 288x224 htime 6399 ptime 4800 vtime 1689599 ctime 2304 frame_clocks 811008 de_h 392 de_v 16
+le2: picture 288x224 active 48000 ns, hs 4700 ns, de_h 8167 ns, de_v 16 -> raw x 155..724, y 21..241
+/media/fat/games/mame#
+
+=== /media/fat/_Arcade/Alien3 - The Gun (World).mra
+alien3
+/media/fat/MiSTer /media/fat/_Arcade/cores/Meathax_SegaSystem32_20260925.rbf /media/fat/_Arcade/Alien3 - The Gun (World).mra
+/media/fat/games/mame#
+--- log
+alien3: video 0x0 htime 0 ptime 0 vtime 0 ctime 0 frame_clocks 0 de_h 0 de_v 0
+alien3: confstr[24] J1,B1,B2,B3,B4,B5,B6,Start,Coin,Test,Service
+alien3: video 320x224 htime 6364 ptime 4967 vtime 1667414 ctime 4800 frame_clocks 0 de_h 510 de_v 26
+alien3: picture 320x224 active 49670 ns, hs 4700 ns, de_h 5277 ns, de_v 26 -> raw x 121..709, y 31..251
+/media/fat/games/mame#
+
+=== /media/fat/_Arcade/Jurassic Park (World, Rev A).mra
+jpark
+/media/fat/MiSTer /media/fat/_Arcade/cores/Meathax_SegaSystem32_20260925.rbf /media/fat/_Arcade/Jurassic Park (World, Rev A).mra
+/media/fat/games/mame#
+--- log
+jpark: video 0x0 htime 0 ptime 0 vtime 0 ctime 0 frame_clocks 0 de_h 0 de_v 0
+jpark: confstr[24] J1,B1,B2,B3,B4,B5,B6,Start,Coin,Test,Service
+jpark: video 320x224 htime 6363 ptime 4968 vtime 1667414 ctime 4800 frame_clocks 0 de_h 510 de_v 26
+jpark: picture 320x224 active 49680 ns, hs 4700 ns, de_h 5278 ns, de_v 26 -> raw x 121..709, y 31..251
+/media/fat/games/mame#
+
+=== /media/fat/_Arcade/Line of Fire (World).mra
+loffire
+/media/fat/MiSTer /media/fat/_Arcade/cores/SegaXBoard_20261004.rbf /media/fat/_Arcade/Line of Fire (World).mra
+/media/fat/games/mame#
+--- log
+loffire: video 0x0 htime 0 ptime 0 vtime 0 ctime 0 frame_clocks 0 de_h 0 de_v 0
+loffire: confstr[25] J1,Button 1,Button 2,Start,Coin,Pause,Test,Service,Gas,Brake
+loffire: video 320x224 htime 6399 ptime 5120 vtime 1676799 ctime 2560 frame_clocks 838400 de_h 256 de_v 18
+loffire: picture 320x224 active 51200 ns, hs 4700 ns, de_h 5120 ns, de_v 18 -> raw x 119..726, y 23..243
+/media/fat/games/mame#
+

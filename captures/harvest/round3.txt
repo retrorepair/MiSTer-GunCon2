@@ -1,0 +1,138 @@
+=== /media/fat/_Arcade/Lethal Enforcers II - Gun Fighters (ver EAA).mra
+le2
+/media/fat/MiSTer /media/fat/_Arcade/cores/KonamiGX_20261005.rbf /media/fat/_Arcade/Lethal Enforcers II - Gun Fighters (ver EAA).mra
+/media/fat#
+--- log
+le2 [KonamiGX]: video 0x0 htime 0 ptime 0 vtime 0 ctime 0 frame_clocks 0 de_h 0 de_v 0
+le2 [KonamiGX]: confstr[27] J1,Button 1,Button 2,Button 3,Button 4,Button 5,Button 6,Start,Coin,Pause,Service
+le2 [KonamiGX]: confstr[28] jn,A,B,X,-,-,-,Start,Select,L,R
+le2 [KonamiGX]: video 288x224 htime 6399 ptime 4800 vtime 1689599 ctime 2304 frame_clocks 811008 de_h 392 de_v 16
+le2 [KonamiGX]: picture 288x224 active 48000 ns, hs 5333 ns (vs 8 lines), de_h 8167 ns, de_v 16 -> raw x 163..731, y 26..246
+/media/fat#
+
+=== /media/fat/_Arcade/Alien3 - The Gun (World).mra
+alien3
+/media/fat/MiSTer /media/fat/_Arcade/cores/Meathax_SegaSystem32_20260925.rbf /media/fat/_Arcade/Alien3 - The Gun (World).mra
+/media/fat#
+--- log
+alien3 [S32]: video 0x0 htime 0 ptime 0 vtime 0 ctime 0 frame_clocks 0 de_h 0 de_v 0
+alien3 [S32]: confstr[24] J1,B1,B2,B3,B4,B5,B6,Start,Coin,Test,Service
+alien3 [S32]: video 320x224 htime 6363 ptime 4968 vtime 1667414 ctime 4800 frame_clocks 0 de_h 510 de_v 26
+alien3 [S32]: picture 320x224 active 49680 ns, hs 4968 ns (vs 3 lines), de_h 5278 ns, de_v 26 -> raw x 124..713, y 31..251
+/media/fat#
+
+=== /media/fat/_Arcade/Jurassic Park (World, Rev A).mra
+jpark
+/media/fat/MiSTer /media/fat/_Arcade/cores/Meathax_SegaSystem32_20260925.rbf /media/fat/_Arcade/Jurassic Park (World, Rev A).mra
+/media/fat#
+--- log
+jpark [S32]: video 0x0 htime 0 ptime 0 vtime 0 ctime 0 frame_clocks 0 de_h 0 de_v 0
+jpark [S32]: confstr[24] J1,B1,B2,B3,B4,B5,B6,Start,Coin,Test,Service
+jpark [S32]: video 320x224 htime 6363 ptime 4967 vtime 1667414 ctime 4800 frame_clocks 0 de_h 510 de_v 26
+jpark [S32]: picture 320x224 active 49670 ns, hs 4967 ns (vs 3 lines), de_h 5277 ns, de_v 26 -> raw x 124..712, y 31..251
+/media/fat#
+
+=== /media/fat/_Arcade/Line of Fire (World).mra
+loffire
+/media/fat/MiSTer /media/fat/_Arcade/cores/SegaXBoard_20261004.rbf /media/fat/_Arcade/Line of Fire (World).mra
+/media/fat#
+--- log
+loffire [SXB]: video 0x0 htime 0 ptime 0 vtime 0 ctime 0 frame_clocks 0 de_h 0 de_v 0
+loffire [SXB]: confstr[25] J1,Button 1,Button 2,Start,Coin,Pause,Test,Service,Gas,Brake
+loffire [SXB]: video 320x224 htime 6399 ptime 5120 vtime 1676799 ctime 2560 frame_clocks 838400 de_h 256 de_v 18
+loffire [SXB]: picture 320x224 active 51200 ns, hs 5120 ns (vs 4 lines), de_h 5120 ns, de_v 18 -> raw x 124..731, y 24..244
+/media/fat#
+
+=== /media/fat/_Arcade/Point Blank 2 (World, GNB2-VER.A).mra
+ptblank2a
+/media/fat/MiSTer /media/fat/_Arcade/cores/SYSTEM11_20260911.rbf /media/fat/_Arcade/Point Blank 2 (World, GNB2-VER.A).mra
+/media/fat#
+--- log
+ptblank2a [SYSTEM11]: video 0x0 htime 0 ptime 0 vtime 0 ctime 0 frame_clocks 0 de_h 0 de_v 0
+ptblank2a [SYSTEM11]: confstr[13] J1,Button1,Button2,Button3,Button4,Button5,Button6,Start,Coin,Pause,Service
+ptblank2a [SYSTEM11]: confstr[14] jn,A,B,X,Y,L,R,Start,Select,L3,R3
+ptblank2a [SYSTEM11]: video 352x240 htime 6355 ptime 5245 vtime 1671756 ctime 2816 frame_clocks 0 de_h 256 de_v 16
+ptblank2a [SYSTEM11]: picture 352x240 active 52450 ns, hs 4690 ns (vs 3 lines), de_h 4768 ns, de_v 16 -> raw x 115..736, y 21..257
+ptblank2a [SYSTEM11]: video 352x240 htime 6356 ptime 5245 vtime 1671755 ctime 2816 frame_clocks 0 de_h 256 de_v 16
+ptblank2a [SYSTEM11]: picture 352x240 active 52450 ns, hs 4690 ns (vs 3 lines), de_h 4768 ns, de_v 16 -> raw x 115..736, y 21..257
+/media/fat#
+
+=== /media/fat/_Arcade/Terminator 2 - Judgment Day (rev LA4 08-03-92).mra
+term2
+/media/fat/MiSTer /media/fat/_Arcade/cores/blahm1d_yunitadpcm_20260921.rbf /media/fat/_Arcade/Terminator 2 - Judgment Day (rev LA4 08-03-92).mra
+/media/fat#
+--- log
+term2 [A.YUNIT]: video 0x0 htime 0 ptime 0 vtime 0 ctime 0 frame_clocks 0 de_h 0 de_v 0
+term2 [A.YUNIT]: confstr[28] J1,Button 1,Button 2,Button 3,Button 4,Button 5,Button 6,Start,Coin
+term2 [A.YUNIT]: confstr[29] jn,A,B,X,Y,L,R,Start,Select
+term2 [A.YUNIT]: video 410x256 htime 6324 ptime 5125 vtime 1827924 ctime 4920 frame_clocks 0 de_h 576 de_v 17
+term2 [A.YUNIT]: picture 410x256 active 51250 ns, hs 4700 ns (vs 3 lines), de_h 6000 ns, de_v 17 -> raw x 130..737, y 22..273
+/media/fat#
+
+=== /media/fat/_Arcade/Rambo III (Europe).mra
+rambo3
+/media/fat/MiSTer /media/fat/_Arcade/cores/TaitoB_20260908.rbf /media/fat/_Arcade/Rambo III (Europe).mra
+/media/fat#
+--- log
+rambo3 [TaitoB]: video 0x0 htime 0 ptime 0 vtime 0 ctime 0 frame_clocks 0 de_h 0 de_v 0
+rambo3 [TaitoB]: video 320x224 htime 6596 ptime 4712 vtime 1669032 ctime 2560 frame_clocks 906752 de_h 272 de_v 22
+rambo3 [TaitoB]: picture 320x224 active 47120 ns, hs 9424 ns (vs 3 lines), de_h 5007 ns, de_v 22 -> raw x 174..732, y 27..247
+/media/fat#
+
+=== /media/fat/_Arcade/Laser Ghost (World) (FD1094 317-0166).mra
+lghost
+/media/fat/MiSTer /media/fat/_Arcade/cores/jts18.rbf /media/fat/_Arcade/Laser Ghost (World) (FD1094 317-0166).mra
+/media/fat#
+--- log
+lghost [JTS18]: video 0x0 htime 0 ptime 0 vtime 0 ctime 0 frame_clocks 0 de_h 0 de_v 0
+lghost [JTS18]: confstr[0] JTS18
+lghost [JTS18]: video 320x224 htime 6666 ptime 5334 vtime 1746666 ctime 2560 frame_clocks 0 de_h 256 de_v 19
+lghost [JTS18]: picture 320x224 active 53340 ns, hs 4700 ns (vs 3 lines), de_h 5334 ns, de_v 19 -> raw x 122..753, y 24..244
+/media/fat#
+
+=== /media/fat/_Arcade/Operation Wolf (World, rev 2, set 1).mra
+opwolf
+/media/fat/MiSTer /media/fat/_Arcade/cores/jtrastan.rbf /media/fat/_Arcade/Operation Wolf (World, rev 2, set 1).mra
+/media/fat#
+--- log
+opwolf [JTRASTAN]: video 0x0 htime 0 ptime 0 vtime 0 ctime 0 frame_clocks 0 de_h 0 de_v 0
+opwolf [JTRASTAN]: confstr[0] JTRASTAN
+opwolf [JTRASTAN]: video 320x240 htime 6355 ptime 4797 vtime 1671675 ctime 2560 frame_clocks 0 de_h 384 de_v 14
+opwolf [JTRASTAN]: picture 320x240 active 47970 ns, hs 4700 ns (vs 3 lines), de_h 7196 ns, de_v 14 -> raw x 144..712, y 19..255
+/media/fat#
+
+=== /media/fat/_Arcade/Time Crisis (World, TS2 Ver.B).mra
+timecris
+/media/fat/MiSTer /media/fat/_Arcade/cores/XNSUPER22_20260913.rbf /media/fat/_Arcade/Time Crisis (World, TS2 Ver.B).mra
+/media/fat#
+--- log
+timecris [SUPER22]: video 0x0 htime 0 ptime 0 vtime 0 ctime 0 frame_clocks 0 de_h 0 de_v 0
+timecris [SUPER22]: confstr[37] J1,Gas,Brake,Shift Up,Shift Down,View,Coin,Service,Test,Motion Stop,Pause
+timecris [SUPER22]: confstr[38] jn,A,B,R,L,X,Select
+timecris [SUPER22]: video 640x480 interlaced htime 6358 ptime 5000 vtime 1669335 ctime 3840 frame_clocks 0 de_h 468 de_v 15
+timecris [SUPER22]: picture 640x480 interlaced active 50000 ns, hs 4700 ns (vs 3 lines), de_h 6094 ns, de_v 15 -> raw x 131..724, y 20..256
+/media/fat#
+
+=== /media/fat/_Arcade/_gun_test/Daytona USA (Revision A) [15kHz CRT].mra
+daytona
+/media/fat/MiSTer /media/fat/_Arcade/cores/Model2.rbf /media/fat/_Arcade/_gun_test/Daytona USA (Revision A) [15kHz CRT].mra
+/media/fat#
+--- log
+daytona [Model2]: video 0x0 htime 0 ptime 0 vtime 0 ctime 0 frame_clocks 0 de_h 0 de_v 0
+daytona [Model2]: confstr[24] J1,Coin,Start,Test,Service,VR1 Red,VR4 Green,Accel,Brake,Gear Up,Gear Down,VR2 Blue,VR3 Yellow
+daytona [Model2]: video 496x384 interlaced htime 6355 ptime 4806 vtime 1738399 ctime 4806 frame_clocks 3476800 de_h 697 de_v 42
+daytona [Model2]: picture 496x384 interlaced active 48060 ns, hs 6201 ns (vs 3 lines), de_h 6970 ns, de_v 42 -> raw x 159..729, y 47..235
+/media/fat#
+
+=== /media/fat/_Arcade/_alternatives/_Point Blank/Point Blank (World, GN2 Rev B, set 2).mra
+ptblanka
+/media/fat/MiSTer /media/fat/_Arcade/cores/Namco_NB1_20261002.rbf /media/fat/_Arcade/_alternatives/_Point Blank/Point Blank (World, GN2 Rev B, set 2).mra
+/media/fat#
+--- log
+ptblanka [NB1]: video 0x0 htime 0 ptime 0 vtime 0 ctime 0 frame_clocks 0 de_h 0 de_v 0
+ptblanka [NB1]: confstr[28] J1,Button 1,Button 2,Button 3,Start,Coin,Service
+ptblanka [NB1]: confstr[29] jn,A,B,X,Start,Select,R
+ptblanka [NB1]: video 288x224 htime 6348 ptime 4762 vtime 1676190 ctime 4608 frame_clocks 1622016 de_h 672 de_v 25
+ptblanka [NB1]: picture 288x224 active 47620 ns, hs 5291 ns (vs 3 lines), de_h 6944 ns, de_v 25 -> raw x 148..712, y 30..250
+/media/fat#
+

@@ -1,0 +1,58 @@
+=== /media/fat/_Arcade/Point Blank 2 (World, GNB2-VER.A).mra
+ptblank2a
+/media/fat/MiSTer /media/fat/_Arcade/cores/SYSTEM11_20260911.rbf /media/fat/_Arcade/Point Blank 2 (World, GNB2-VER.A).mra
+/media/fat/games/mame#
+--- log
+ptblank2a: video 0x0 htime 0 ptime 0 vtime 0 ctime 0 frame_clocks 0 de_h 0 de_v 0
+ptblank2a: confstr[13] J1,Button1,Button2,Button3,Button4,Button5,Button6,Start,Coin,Pause,Service
+ptblank2a: confstr[14] jn,A,B,X,Y,L,R,Start,Select,L3,R3
+ptblank2a: video 352x240 htime 6356 ptime 5245 vtime 1671755 ctime 2816 frame_clocks 0 de_h 256 de_v 16
+ptblank2a: picture 352x240 active 52450 ns, hs 5290 ns, de_h 4768 ns, de_v 16 -> raw x 122..743, y 21..257
+ptblank2a: video 352x240 htime 6356 ptime 5244 vtime 1671755 ctime 2816 frame_clocks 0 de_h 256 de_v 16
+ptblank2a: picture 352x240 active 52440 ns, hs 5290 ns, de_h 4767 ns, de_v 16 -> raw x 122..743, y 21..257
+/media/fat/games/mame#
+
+=== /media/fat/_Arcade/Terminator 2 - Judgment Day (rev LA4 08-03-92).mra
+term2
+/media/fat/MiSTer /media/fat/_Arcade/cores/blahm1d_yunitadpcm_20260921.rbf /media/fat/_Arcade/Terminator 2 - Judgment Day (rev LA4 08-03-92).mra
+/media/fat/games/mame#
+--- log
+term2: video 0x0 htime 0 ptime 0 vtime 0 ctime 0 frame_clocks 0 de_h 0 de_v 0
+term2: confstr[28] J1,Button 1,Button 2,Button 3,Button 4,Button 5,Button 6,Start,Coin
+term2: confstr[29] jn,A,B,X,Y,L,R,Start,Select
+term2: video 410x256 htime 6324 ptime 5125 vtime 1827924 ctime 4920 frame_clocks 0 de_h 576 de_v 17
+term2: picture 410x256 active 51250 ns, hs 4700 ns, de_h 6000 ns, de_v 17 -> raw x 130..737, y 22..273
+/media/fat/games/mame#
+
+=== /media/fat/_Arcade/Rambo III (Europe).mra
+rambo3
+/media/fat/MiSTer /media/fat/_Arcade/cores/TaitoB_20260908.rbf /media/fat/_Arcade/Rambo III (Europe).mra
+/media/fat/games/mame#
+--- log
+rambo3: video 0x0 htime 0 ptime 0 vtime 0 ctime 0 frame_clocks 0 de_h 0 de_v 0
+rambo3: video 320x224 htime 6596 ptime 4712 vtime 1669032 ctime 2560 frame_clocks 906752 de_h 272 de_v 22
+rambo3: picture 320x224 active 47120 ns, hs 4700 ns, de_h 5007 ns, de_v 22 -> raw x 118..676, y 27..247
+/media/fat/games/mame#
+
+=== /media/fat/_Arcade/Laser Ghost (World) (FD1094 317-0166).mra
+lghost
+/media/fat/MiSTer /media/fat/_Arcade/cores/jts18.rbf /media/fat/_Arcade/Laser Ghost (World) (FD1094 317-0166).mra
+/media/fat/games/mame#
+--- log
+lghost: video 0x0 htime 0 ptime 0 vtime 0 ctime 0 frame_clocks 0 de_h 0 de_v 0
+lghost: confstr[0] JTS18
+lghost: video 320x224 htime 6666 ptime 5334 vtime 1746666 ctime 2560 frame_clocks 0 de_h 256 de_v 19
+lghost: picture 320x224 active 53340 ns, hs 4700 ns, de_h 5334 ns, de_v 19 -> raw x 122..753, y 24..244
+/media/fat/games/mame#
+
+=== /media/fat/_Arcade/Operation Wolf (World, rev 2, set 1).mra
+opwolf
+/media/fat/MiSTer /media/fat/_Arcade/cores/jtrastan.rbf /media/fat/_Arcade/Operation Wolf (World, rev 2, set 1).mra
+/media/fat/games/mame#
+--- log
+opwolf: video 0x0 htime 0 ptime 0 vtime 0 ctime 0 frame_clocks 0 de_h 0 de_v 0
+opwolf: confstr[0] JTRASTAN
+opwolf: video 320x240 htime 6355 ptime 4797 vtime 1671674 ctime 2560 frame_clocks 0 de_h 384 de_v 14
+opwolf: picture 320x240 active 47970 ns, hs 4700 ns, de_h 7196 ns, de_v 14 -> raw x 144..712, y 19..255
+/media/fat/games/mame#
+
