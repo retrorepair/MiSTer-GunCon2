@@ -1,7 +1,7 @@
 From ee1ccc3902f18aa143c853fc5221055aad585895 Mon Sep 17 00:00:00 2001
 From: retrorepair <joelwhybrow@googlemail.com>
 Date: Thu, 15 Oct 2026 21:28:26 +0100
-Subject: [PATCH 2/2] input: CRT lightgun tracker, calibration safety
+Subject: [PATCH 2/4] input: CRT lightgun tracker, calibration safety
 
 GunCon 2 reports X = 0 (or 1 from stray light) while it sees no light.
 Replace the flat 50 ms hold of the last position with a tracker that

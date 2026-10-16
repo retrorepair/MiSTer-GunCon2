@@ -33,6 +33,7 @@ done
 git log --oneline "$base"..HEAD
 
 g++ -std=gnu++14 -Wall -Wextra -I. test/lightgun_crt_test.cpp lightgun_crt.cpp -o /tmp/lgtest && /tmp/lgtest
+g++ -std=gnu++14 -Wall -Wextra -I. test/guncal_test.cpp guncal.cpp -o /tmp/gctest && /tmp/gctest
 
 mkdir -p "$repo/build"
 rm -f bin/input.cpp.o && make GUNDBG=1 -j"$(nproc)" 2>&1 | grep -E "warning|error" || true

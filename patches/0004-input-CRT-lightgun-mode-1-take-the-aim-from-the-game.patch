@@ -1,0 +1,469 @@
+From b69915edab2f76a04003a3f222f4200a580f5429 Mon Sep 17 00:00:00 2001
+From: retrorepair <joelwhybrow@googlemail.com>
+Date: Fri, 16 Oct 2026 23:25:08 +0100
+Subject: [PATCH 4/4] input: CRT lightgun mode 1: take the aim from the game's
+ flash
+
+In many gun games the aim point is dark most of the time (about 82% of
+the gun's reports in Point Blank saw no light) and the game flashes the
+screen after the trigger so the gun can measure. The continuous tracker
+then holds, expires, or throws the aim to the edge between shots.
+
+LIGHTGUN_CRT_MODE=1 (default): on a trigger pull the pointer is set to the
+tracker's estimate at that instant, then to the median of the first three
+complete valid reports that follow (the flash, within LIGHTGUN_CRT_SHOT_MS,
+now 400 ms; in Point Blank the light returns 50-100 ms after the pull), and
+it then holds until the next pull. A pull with no light and no flash stays
+offscreen. The core is given the held aim (crtgun_deliver) instead of the
+gun's raw axes. LIGHTGUN_CRT_MODE=0 keeps the continuous tracker.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ cfg.cpp                    |   4 +-
+ cfg.h                      |   1 +
+ input.cpp                  |  50 ++++++++++++++++--
+ lightgun_crt.cpp           |  78 +++++++++++++++++++++++++++-
+ lightgun_crt.h             |  33 ++++++++++--
+ test/lightgun_crt_test.cpp | 101 +++++++++++++++++++++++++++++++++++--
+ 6 files changed, 254 insertions(+), 13 deletions(-)
+
+diff --git a/cfg.cpp b/cfg.cpp
+index 5dae52b..630ee37 100644
+--- a/cfg.cpp
++++ b/cfg.cpp
+@@ -149,6 +149,7 @@ static const ini_var_t ini_vars[] =
+ 	{ "KEYBOARD_AS_JOYSTICK", (void*)(cfg.keyboard_as_joystick), HEX32ARR, 0, 0xFFFFFFFF },
+ 	{ "SANITY_CHECK", (void *)(&(cfg.sanity_check)), UINT8, 0, 1 },
+ 	{ "LIGHTGUN_CRT_TRACKER", (void *)(&(cfg.lightgun_crt_tracker)), UINT8, 0, 1 },
++	{ "LIGHTGUN_CRT_MODE", (void *)(&(cfg.lightgun_crt_mode)), UINT8, 0, 1 },
+ 	{ "GUNCAL_MARGIN", (void *)(&(cfg.guncal_margin)), UINT8, 6, 30 },
+ 	{ "LIGHTGUN_CRT_EDGE_PCT", (void *)(&(cfg.lightgun_crt_edge_pct)), UINT8, 0, 40 },
+ 	{ "LIGHTGUN_CRT_X_VALID_MIN", (void *)(&(cfg.lightgun_crt_x_valid_min)), UINT16, 0, 200 },
+@@ -608,10 +609,11 @@ void cfg_parse()
+ 	cfg.rumble = 1;
+ 	cfg.dpad_threshold = 50;
+ 	cfg.lightgun_crt_tracker = 1;
++	cfg.lightgun_crt_mode = 1;
+ 	cfg.guncal_margin = 12;
+ 	cfg.lightgun_crt_edge_pct = 12;
+ 	cfg.lightgun_crt_x_valid_min = 16;
+-	cfg.lightgun_crt_shot_ms = 200;
++	cfg.lightgun_crt_shot_ms = 400;
+ 	cfg.lightgun_crt_dark_ms = 500;
+ 	cfg.wheel_force = 50;
+ 	cfg.dvi_mode = 2;
+diff --git a/cfg.h b/cfg.h
+index a79814a..5823b3a 100644
+--- a/cfg.h
++++ b/cfg.h
+@@ -81,6 +81,7 @@ typedef struct {
+ 	char controller_deadzone[32][256];
+ 	uint8_t dpad_threshold;
+ 	uint8_t lightgun_crt_tracker;
++	uint8_t lightgun_crt_mode;
+ 	uint8_t guncal_margin;
+ 	uint8_t lightgun_crt_edge_pct;
+ 	uint16_t lightgun_crt_x_valid_min;
+diff --git a/input.cpp b/input.cpp
+index c9140d1..36911fa 100644
+--- a/input.cpp
++++ b/input.cpp
+@@ -2087,9 +2087,9 @@ static void gundbg_log_out(int dev, const crtgun_state *st, uint32_t t_ms)
+ 		f = fopen("/tmp/gundbg_out.csv", "w");
+ 		if (!f) return;
+ 		setvbuf(f, NULL, _IOLBF, 0);
+-		fprintf(f, "dev,t_ms,raw_x,raw_y,trig,shot,out_x,out_y,offscreen\n");
++		fprintf(f, "dev,t_ms,raw_x,raw_y,trig,shot,out_x,out_y,offscreen,pub_x,pub_y,pub_off\n");
+ 	}
+-	bytes += fprintf(f, "%d,%u,%d,%d,%d,%d,%d,%d,%d\n", dev, (unsigned)t_ms, (int)st->raw_x, (int)st->raw_y, (int)st->trig, (int)st->shot, (int)st->out_x, (int)st->out_y, (int)st->offscreen);
++	bytes += fprintf(f, "%d,%u,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n", dev, (unsigned)t_ms, (int)st->raw_x, (int)st->raw_y, (int)st->trig, (int)st->shot, (int)st->out_x, (int)st->out_y, (int)st->offscreen, (int)st->pub_x, (int)st->pub_y, (int)st->pub_off);
+ 	if (now != last_flush)
+ 	{
+ 		fflush(f);
+@@ -2164,6 +2164,41 @@ static void crtgun_get_params(int i, crtgun_params *p)
+ 	p->shot_ms = cfg.lightgun_crt_shot_ms;
+ 	p->dark_ms = cfg.lightgun_crt_dark_ms;
+ 	p->edge_pct = cfg.lightgun_crt_edge_pct;
++	p->mode = cfg.lightgun_crt_mode;
++}
++
++// Mode 1 (aim from the game's flash): the core is given the held aim, not the gun's raw axes. Send it whenever it changes.
++static int32_t crtgun_sent[NUMDEV][2];
++static bool    crtgun_sent_ok[NUMDEV];
++
++static void crtgun_deliver(int i, const crtgun_params *p)
++{
++	if (p->mode != 1) return;
++
++	int32_t px = crtgun[i].pub_off ? p->xmin - 1 : crtgun[i].pub_x;    // one unit outside the range clamps to the edge = offscreen
++	int32_t py = crtgun[i].pub_off ? p->ymin - 1 : crtgun[i].pub_y;
++
++	struct input_absinfo ai;
++	struct input_event e;
++	memset(&ai, 0, sizeof(ai));
++	memset(&e, 0, sizeof(e));
++	e.type = EV_ABS;
++
++	if (!crtgun_sent_ok[i] || px != crtgun_sent[i][0])
++	{
++		ai.minimum = p->xmin; ai.maximum = p->xmax;
++		e.code = ABS_X; e.value = px;
++		input_cb(&e, &ai, i);
++		crtgun_sent[i][0] = px;
++	}
++	if (!crtgun_sent_ok[i] || py != crtgun_sent[i][1])
++	{
++		ai.minimum = p->ymin; ai.maximum = p->ymax;
++		e.code = ABS_Y; e.value = py;
++		input_cb(&e, &ai, i);
++		crtgun_sent[i][1] = py;
++	}
++	crtgun_sent_ok[i] = true;
+ }
+ 
+ // Feed one raw evdev event of a CRT lightgun to the tracker (lightgun_crt.cpp).
+@@ -2176,17 +2211,23 @@ static void crtgun_feed(int i, const struct input_event *ev)
+ 	if (ev->type == EV_ABS && (ev->code == ABS_X || ev->code == ABS_Y))
+ 	{
+ 		crtgun_set_axis(&crtgun[i], ev->code == ABS_X, ev->value);
++		crtgun_update(&crtgun[i], &p, now);
+ 	}
+ 	else if (ev->type == EV_KEY && ev->code == GUNCON2_TRIGGER_CODE)
+ 	{
+ 		crtgun_set_trigger(&crtgun[i], ev->value != 0, now, &p);
++		crtgun_update(&crtgun[i], &p, now);
++	}
++	else if (ev->type == EV_SYN)
++	{
++		crtgun_report(&crtgun[i], &p, now);             // a complete gun report
+ 	}
+ 	else
+ 	{
+ 		return;
+ 	}
+ 
+-	crtgun_update(&crtgun[i], &p, now);
++	crtgun_deliver(i, &p);
+ 
+ #ifdef GUNDBG
+ 	gundbg_log_out(i, &crtgun[i], now);
+@@ -6345,6 +6386,9 @@ int input_test(int getchar)
+ 									if (!cfg.lightgun_crt_tracker || crtgun[i].raw_x >= (int32_t)cfg.lightgun_crt_x_valid_min)
+ 										menu_lightgun_cb(i, ev.type, ev.code, ev.value);
+ 
++									// Aim-from-the-flash mode: the core is given the held aim by crtgun_deliver(), not the raw axes.
++									if (cfg.lightgun_crt_tracker && cfg.lightgun_crt_mode == 1) continue;
++
+ 									if (ev.code == ABS_X)
+ 									{
+ 										absinfo.minimum = input[i].guncal[2];
+diff --git a/lightgun_crt.cpp b/lightgun_crt.cpp
+index df4efc1..1449c82 100644
+--- a/lightgun_crt.cpp
++++ b/lightgun_crt.cpp
+@@ -21,8 +21,60 @@ static bool is_interior(const crtgun_state *s, const crtgun_params *p)
+ 	       s->last_y >= p->ymin + my && s->last_y <= p->ymax - my;
+ }
+ 
++static void update_rules(crtgun_state *s, const crtgun_params *p, uint32_t now_ms);
++
++static int32_t median3(const int32_t *v, int n)
++{
++	int32_t t[CRTGUN_FLASH_N] = {};
++	if (n < 1) return 0;
++	for (int i = 0; i < n; i++) t[i] = v[i];
++	for (int i = 1; i < n; i++)
++	{
++		int32_t k = t[i];
++		int j = i - 1;
++		while (j >= 0 && t[j] > k) { t[j + 1] = t[j]; j--; }
++		t[j + 1] = k;
++	}
++	return t[n / 2];
++}
++
++// the value to give the core, from the rules' estimate and, in mode 1, the held aim
++static void publish(crtgun_state *s, const crtgun_params *p, uint32_t now_ms)
++{
++	if (p->mode != 1)
++	{
++		s->pub_x = s->out_x;
++		s->pub_y = s->out_y;
++		s->pub_off = s->offscreen;
++		return;
++	}
++
++	if (!s->pub_init)
++	{
++		s->pub_init = true;
++		s->pub_x = (p->xmin + p->xmax) / 2;
++		s->pub_y = (p->ymin + p->ymax) / 2;
++		s->pub_off = false;
++	}
++
++	if (s->win_open && (uint32_t)(now_ms - s->win_t0) > p->shot_ms) s->win_open = false;
++}
++
+ void crtgun_set_trigger(crtgun_state *s, bool down, uint32_t now_ms, const crtgun_params *p)
+ {
++	if (down && !s->trig && p->mode == 1)
++	{
++		// the rules' best estimate at this instant is the aim until the flash arrives
++		update_rules(s, p, now_ms);
++		s->pub_init = true;
++		s->pub_x = s->out_x;
++		s->pub_y = s->out_y;
++		s->pub_off = s->offscreen;
++		s->win_open = true;
++		s->win_t0 = now_ms;
++		s->win_n = 0;
++	}
++
+ 	if (down && !s->trig)
+ 	{
+ 		// Only a pull made while the gun is tracking can be followed through the game's flash.
+@@ -36,7 +88,7 @@ void crtgun_set_trigger(crtgun_state *s, bool down, uint32_t now_ms, const crtgu
+ 	s->trig = down;
+ }
+ 
+-void crtgun_update(crtgun_state *s, const crtgun_params *p, uint32_t now_ms)
++static void update_rules(crtgun_state *s, const crtgun_params *p, uint32_t now_ms)
+ {
+ 	if (s->shot && (uint32_t)(now_ms - s->shot_t) > p->shot_ms) s->shot = false;
+ 
+@@ -80,3 +132,27 @@ void crtgun_update(crtgun_state *s, const crtgun_params *p, uint32_t now_ms)
+ 		s->offscreen = true;
+ 	}
+ }
++
++void crtgun_update(crtgun_state *s, const crtgun_params *p, uint32_t now_ms)
++{
++	update_rules(s, p, now_ms);
++	publish(s, p, now_ms);
++}
++
++// One complete gun report has arrived (the SYN event): in mode 1 it may be part of the flash measurement.
++void crtgun_report(crtgun_state *s, const crtgun_params *p, uint32_t now_ms)
++{
++	update_rules(s, p, now_ms);
++	publish(s, p, now_ms);
++
++	if (p->mode == 1 && s->win_open && crtgun_valid(s, p))
++	{
++		s->win_x[s->win_n] = s->raw_x;
++		s->win_y[s->win_n] = s->raw_y;
++		s->win_n++;
++		s->pub_x = median3(s->win_x, s->win_n);
++		s->pub_y = median3(s->win_y, s->win_n);
++		s->pub_off = false;
++		if (s->win_n >= CRTGUN_FLASH_N) s->win_open = false;     // the flash is in: hold it
++	}
++}
+diff --git a/lightgun_crt.h b/lightgun_crt.h
+index 03dd453..ae4b704 100644
+--- a/lightgun_crt.h
++++ b/lightgun_crt.h
+@@ -22,6 +22,14 @@
+ // "no event" therefore means "unchanged", and the time of the last valid event says nothing about how
+ // long the light has really been gone. The dark-gap timer starts at the transition to "no light".
+ //
++// Two ways to hand a position to the core (params.mode):
++//   0  follow the gun continuously, applying the rules above;
++//   1  take the aim from the game's flash and hold it. The game flashes the screen after the trigger so the gun can
++//      measure, and the readings during that flash are the clean ones; between shots the scene (mostly dark in many
++//      games) makes the gun's readings wander or vanish. On a trigger pull the pointer is set to the rules' best
++//      estimate at that instant, then to the median of the first CRTGUN_FLASH_N valid readings that follow (the
++//      flash), and it then stays put until the next pull. A pull with no light and no flash stays offscreen.
++//
+ // No video or core knowledge is needed; times are in milliseconds and may wrap.
+ 
+ struct crtgun_params
+@@ -32,8 +40,11 @@ struct crtgun_params
+ 	uint32_t shot_ms;       // window after a trigger pull (made while tracking) that ignores dark reports
+ 	uint32_t dark_ms;       // longest hold across a dark gap that began inside the screen
+ 	int32_t  edge_pct;      // percentage of each axis span, from each edge, that counts as "edge"
++	int32_t  mode;          // 0 continuous, 1 aim from the game's flash (see above)
+ };
+ 
++#define CRTGUN_FLASH_N 3   // valid readings after a pull that make up the flash measurement
++
+ struct crtgun_state
+ {
+ 	int32_t  raw_x, raw_y;  // latest raw report
+@@ -45,15 +56,27 @@ struct crtgun_state
+ 	bool     trig;          // trigger currently down
+ 	bool     shot;          // shot window open (until shot_t + shot_ms)
+ 
+-	// result of the last crtgun_update()
+-	int32_t  out_x, out_y;  // position to give the core, raw gun units
++	// result of the last crtgun_update(): what the rules say right now
++	int32_t  out_x, out_y;  // position, raw gun units
+ 	bool     offscreen;     // true: out_x/out_y are forced outside the screen
++
++	// mode 1 (aim from the flash)
++	bool     pub_init;
++	bool     win_open;      // collecting the flash measurement
++	uint32_t win_t0;        // time of the pull
++	int      win_n;
++	int32_t  win_x[CRTGUN_FLASH_N], win_y[CRTGUN_FLASH_N];
++
++	// what to give the core: out_x/out_y in mode 0, the held aim in mode 1
++	int32_t  pub_x, pub_y;
++	bool     pub_off;
+ };
+ 
+ #define CRTGUN_DEF_X_VALID_MIN 16
+-#define CRTGUN_DEF_SHOT_MS     200
++#define CRTGUN_DEF_SHOT_MS     400   // how long after a pull the flash is waited for
+ #define CRTGUN_DEF_DARK_MS     500
+ #define CRTGUN_DEF_EDGE_PCT    12
++#define CRTGUN_DEF_MODE        1
+ 
+ void crtgun_reset(crtgun_state *s);
+ 
+@@ -61,8 +84,10 @@ void crtgun_reset(crtgun_state *s);
+ void crtgun_set_axis(crtgun_state *s, bool is_x, int32_t value);
+ void crtgun_set_trigger(crtgun_state *s, bool down, uint32_t now_ms, const crtgun_params *p);
+ 
+-// Recompute out_x / out_y / offscreen.
++// Recompute out_x / out_y / offscreen (call after any single event) ...
+ void crtgun_update(crtgun_state *s, const crtgun_params *p, uint32_t now_ms);
++// ... and call this at the end of each complete gun report (the SYN event): it also feeds the flash measurement.
++void crtgun_report(crtgun_state *s, const crtgun_params *p, uint32_t now_ms);
+ 
+ // True if the raw X means the gun sees light.
+ static inline bool crtgun_valid(const crtgun_state *s, const crtgun_params *p)
+diff --git a/test/lightgun_crt_test.cpp b/test/lightgun_crt_test.cpp
+index 82ce8e1..f878baa 100644
+--- a/test/lightgun_crt_test.cpp
++++ b/test/lightgun_crt_test.cpp
+@@ -8,15 +8,20 @@ static int failures = 0;
+ #define CHECK(cond) do { if (!(cond)) { printf("FAIL line %d: %s\n", __LINE__, #cond); failures++; } } while (0)
+ 
+ // default GunCon 2 calibration used by Main_MiSTer: X 145..700, Y 25..245
+-static crtgun_params P = { 145, 700, 25, 245, CRTGUN_DEF_X_VALID_MIN, CRTGUN_DEF_SHOT_MS, CRTGUN_DEF_DARK_MS, CRTGUN_DEF_EDGE_PCT };
++static crtgun_params P = { 145, 700, 25, 245, CRTGUN_DEF_X_VALID_MIN, CRTGUN_DEF_SHOT_MS, CRTGUN_DEF_DARK_MS, CRTGUN_DEF_EDGE_PCT, 0 };
++
++// the same box with the aim taken from the game's flash
++static crtgun_params P1 = { 145, 700, 25, 245, CRTGUN_DEF_X_VALID_MIN, CRTGUN_DEF_SHOT_MS, CRTGUN_DEF_DARK_MS, CRTGUN_DEF_EDGE_PCT, 1 };
+ 
+ struct Rig
+ {
+ 	crtgun_state s;
+ 	uint32_t t;
+-	Rig(uint32_t t0 = 1000) : t(t0) { crtgun_reset(&s); }
+-	void report(uint32_t at, int x, int y) { t = at; crtgun_set_axis(&s, true, x); crtgun_set_axis(&s, false, y); crtgun_update(&s, &P, t); }
+-	void trigger(uint32_t at, bool down) { t = at; crtgun_set_trigger(&s, down, t, &P); crtgun_update(&s, &P, t); }
++	const crtgun_params *pp;
++	Rig(uint32_t t0 = 1000) : t(t0), pp(&P) { crtgun_reset(&s); }
++	Rig(const crtgun_params *params, uint32_t t0 = 1000) : t(t0), pp(params) { crtgun_reset(&s); }
++	void report(uint32_t at, int x, int y) { t = at; crtgun_set_axis(&s, true, x); crtgun_set_axis(&s, false, y); crtgun_update(&s, pp, t); crtgun_report(&s, pp, t); }
++	void trigger(uint32_t at, bool down) { t = at; crtgun_set_trigger(&s, down, t, pp); crtgun_update(&s, pp, t); }
+ };
+ 
+ static void test_tracking_passes_through()
+@@ -150,6 +155,88 @@ static void test_time_wraparound()
+ 	CHECK(r.s.offscreen);
+ }
+ 
++// ---- mode 1: aim from the game's flash ----
++
++static void test_flash_mode_holds_between_pulls()
++{
++	Rig r(&P1);
++	r.report(1000, 300, 100);
++	CHECK(!r.s.pub_off && r.s.pub_x == (P1.xmin + P1.xmax) / 2 && r.s.pub_y == (P1.ymin + P1.ymax) / 2);   // no pull yet: the middle
++	r.report(1020, 350, 150);
++	r.report(1040, 0, 5);
++	r.report(1060, 500, 200);
++	CHECK(!r.s.pub_off && r.s.pub_x == (P1.xmin + P1.xmax) / 2);                                              // the scene does not move it
++}
++
++static void test_pull_with_light_takes_the_flash_readings()
++{
++	Rig r(&P1);
++	r.report(1000, 300, 100);
++	r.trigger(1010, true);
++	CHECK(!r.s.pub_off && r.s.pub_x == 300 && r.s.pub_y == 100);              // the best estimate at the instant of the pull
++	r.report(1060, 0, 5);                                                      // the black frame
++	CHECK(r.s.pub_x == 300);
++	r.report(1100, 310, 102);                                                  // the flash
++	CHECK(r.s.pub_x == 310 && r.s.pub_y == 102);
++	r.report(1117, 312, 103);
++	r.report(1133, 308, 101);
++	CHECK(r.s.pub_x == 310 && r.s.pub_y == 102);                               // median of the first three
++	r.report(1200, 400, 200);                                                  // the scene afterwards
++	CHECK(r.s.pub_x == 310 && r.s.pub_y == 102 && !r.s.pub_off);
++}
++
++static void test_pull_in_the_dark_waits_for_the_flash()
++{
++	Rig r(&P1);
++	for (int i = 0; i < 20; i++) r.report(1000 + i * 20, i & 1, 5);          // nothing but noise
++	r.trigger(1500, true);
++	CHECK(r.s.pub_off);                                                        // nothing seen: offscreen until the flash says otherwise
++	r.report(1560, 0, 5);
++	CHECK(r.s.pub_off);
++	r.report(1580, 250, 120);                                                  // the game's flash lights up the aim
++	CHECK(!r.s.pub_off && r.s.pub_x == 250 && r.s.pub_y == 120);
++	r.report(1597, 252, 121);
++	r.report(1613, 248, 119);
++	CHECK(r.s.pub_x == 250 && r.s.pub_y == 120);
++}
++
++static void test_pull_with_no_flash_stays_offscreen()
++{
++	Rig r(&P1);
++	for (int i = 0; i < 10; i++) r.report(1000 + i * 20, i & 1, 5);
++	r.trigger(1300, true);
++	for (int i = 0; i < 30; i++) r.report(1320 + i * 20, i & 1, 5);          // no light for 600 ms
++	CHECK(r.s.pub_off);
++	r.report(2000, 300, 100);                                                  // too late: the window is over
++	CHECK(r.s.pub_off);
++}
++
++static void test_dark_interior_pull_holds_the_aim_until_the_flash()
++{
++	Rig r(&P1);
++	r.report(1000, 420, 135);                                                  // aiming mid-screen
++	r.report(1020, 0, 5);                                                      // scene went dark
++	r.trigger(1200, true);
++	CHECK(!r.s.pub_off && r.s.pub_x == 420 && r.s.pub_y == 135);              // the interior hold carries the aim
++	r.report(1260, 424, 138);                                                  // flash
++	CHECK(r.s.pub_x == 424 && r.s.pub_y == 138);
++}
++
++static void test_each_pull_restarts_the_measurement()
++{
++	Rig r(&P1);
++	r.report(1000, 300, 100);
++	r.trigger(1010, true);
++	r.report(1050, 300, 100); r.report(1067, 301, 100); r.report(1083, 299, 100);
++	r.trigger(1100, false);
++	CHECK(r.s.pub_x == 300);
++	r.report(1500, 500, 200);
++	r.trigger(1510, true);
++	CHECK(r.s.pub_x == 500 && r.s.pub_y == 200);
++	r.report(1560, 502, 201); r.report(1577, 498, 199); r.report(1593, 500, 200);
++	CHECK(r.s.pub_x == 500 && r.s.pub_y == 200);
++}
++
+ int main()
+ {
+ 	test_tracking_passes_through();
+@@ -162,6 +249,12 @@ int main()
+ 	test_dark_scene_shot_uses_interior_hold();
+ 	test_still_gun_loses_light_much_later();
+ 	test_time_wraparound();
++	test_flash_mode_holds_between_pulls();
++	test_pull_with_light_takes_the_flash_readings();
++	test_pull_in_the_dark_waits_for_the_flash();
++	test_pull_with_no_flash_stays_offscreen();
++	test_dark_interior_pull_holds_the_aim_until_the_flash();
++	test_each_pull_restarts_the_measurement();
+ 	if (failures) { printf("%d check(s) failed\n", failures); return 1; }
+ 	printf("all lightgun_crt tests passed\n");
+ 	return 0;
+-- 
+2.53.0.windows.1
+
