@@ -12,6 +12,7 @@ your stock `MiSTer` binary on the SD card yet.
 |---|---|
 | [docs/CALIBRATION-CORE.md](docs/CALIBRATION-CORE.md) | The GunCal core: the calibration flow, the pages, how it fits together |
 | [docs/DESIGN.md](docs/DESIGN.md) | Measured evidence, the design and why, limits, how to test |
+| [docs/CORES.md](docs/CORES.md) | Per core: where it came from, its measured video, sync width, buttons, and whether it has been tested |
 | [HANDOFF.md](HANDOFF.md) | What is running on the MiSTer now and what is next |
 
 ## How it works
@@ -41,11 +42,15 @@ your stock `MiSTer` binary on the SD card yet.
 
 ## What is in this repo
 
-- `patches/` four patches to Main_MiSTer 13f1de9, in order:
+- `patches/` eight patches to Main_MiSTer 13f1de9, in order:
   - `0001` `GUNDBG=1` raw trace of every GunCon event and tracker decision (measurement only)
   - `0002` the continuous tracker (`lightgun_crt.cpp`), `MiSTer.ini` keys, calibration safety fixes (no divide by zero)
   - `0003` GunCal support: the calibration sequence and maths (`guncal.cpp`), the universal mapping onto a core, the core drive code
   - `0004` mode 1: aim from the game's flash
+  - `0005` logs the framework's measured video timing of the running core (`/tmp/guncal_apply.log`)
+  - `0006` the universal mapping now handles interlaced cores and cores without `frame_clocks` (Super System 22 and Model 2 are 480i/384i)
+  - `0007` also logs the core's own `J`/`j` button lists
+  - `0008` the Sega Model 2 core's HSync width (64 pixels)
 - `cores/GunCal/` the FPGA core (Quartus Lite 17.0, framework `sys/` fetched from Template_MiSTer at build time).
 - `scripts/` `build-main-mister.sh` (ARM build in WSL, runs the host tests, reproducible), `build-guncal.sh` (the core).
 - `tools/mister/` helpers for the MiSTer's UART console and on-device tests (`serial_run.py`, `console.ps1`, `usbraw.py`, `fakegun*.py`,

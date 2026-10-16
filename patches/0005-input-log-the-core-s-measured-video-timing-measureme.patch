@@ -1,0 +1,53 @@
+From c0a0d6b88e1259e21e803438cedd8cc30906ecaa Mon Sep 17 00:00:00 2001
+From: retrorepair <joelwhybrow@googlemail.com>
+Date: Fri, 16 Oct 2026 23:45:40 +0100
+Subject: [PATCH] input: log the core's measured video timing (measurement aid)
+
+Appends one line to /tmp/guncal_apply.log whenever the framework's measured
+timing for the running core changes, before the universal mapping decides
+whether it can use it. Without it there is no way to tell why the mapping was
+skipped for a core (interlaced, incomplete timing, out of range).
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ input.cpp | 20 ++++++++++++++++++++
+ 1 file changed, 20 insertions(+)
+
+diff --git a/input.cpp b/input.cpp
+index 36911fa..e1b23d4 100644
+--- a/input.cpp
++++ b/input.cpp
+@@ -2102,6 +2102,24 @@ static void gundbg_log_out(int dev, const crtgun_state *st, uint32_t t_ms)
+ 
+ static crtgun_state crtgun[NUMDEV];
+ 
++// Record what the framework measured of the running core's video (one line per change). This is what the mapping below
++// is derived from, and the only way to see why it was skipped for a core (interlaced, incomplete, out of range).
++static void guncal_log_video(const char *core, const VideoInfo *v)
++{
++	static char last_core[64] = "";
++	static uint32_t last_sig = 0;
++	uint32_t sig = v->width * 31u + v->height * 17u + v->htime * 13u + v->ptime * 7u + v->vtime * 19u + v->de_h * 5u + v->de_v * 3u + v->frame_clocks + (v->interlaced ? 1u : 0u);
++	if (sig == last_sig && !strcmp(core, last_core)) return;
++	last_sig = sig;
++	snprintf(last_core, sizeof(last_core), "%s", core);
++
++	FILE *lf = fopen("/tmp/guncal_apply.log", "a");
++	if (!lf) return;
++	fprintf(lf, "%s: video %ux%u%s htime %u ptime %u vtime %u frame_clocks %u de_h %u de_v %u\n", core, v->width, v->height, v->interlaced ? " interlaced" : "",
++		v->htime, v->ptime, v->vtime, v->frame_clocks, v->de_h, v->de_v);
++	fclose(lf);
++}
++
+ // Derive the running core's picture edges (the four numbers a per-core calibration would store) from the gun's
+ // universal calibration and the core's measured video timing. See guncal.h. Recomputed when the timing changes.
+ static void guncal_apply_universal(int i)
+@@ -2111,6 +2129,8 @@ static void guncal_apply_universal(int i)
+ 	const char *core = user_io_get_core_name();
+ 	if (!strcmp(core, "GUNCAL")) return;
+ 
++	guncal_log_video(core, &current_video_info);
++
+ 	const VideoInfo *v = &current_video_info;
+ 	if (!v->width || !v->height || !v->htime || !v->ptime || !v->vtime || !v->frame_clocks || v->interlaced) return;
+ 

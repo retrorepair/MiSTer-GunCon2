@@ -1,0 +1,29 @@
+From c927e098312235d48176537e7a3ab5eb3644e8b4 Mon Sep 17 00:00:00 2001
+From: retrorepair <joelwhybrow@googlemail.com>
+Date: Sat, 17 Oct 2026 00:01:03 +0100
+Subject: [PATCH 8/8] input: Sega Model 2 core's HSync width for the universal
+ mapping
+
+The Model 2 core's HSync is 64 pixels in every video mode (m2_video_timing.sv:
+H_SYNC_END - H_SYNC_START), so its width in time follows from the measured
+picture time per pixel. Covers the Model 2 core's own name and its MRA set names
+(vcop*, daytona*, desert).
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ input.cpp | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/input.cpp b/input.cpp
+index 0d00375..fa5fb3f 100644
+--- a/input.cpp
++++ b/input.cpp
+@@ -2166,6 +2166,8 @@ static void guncal_apply_universal(int i)
+ 	t.vs_lines = 3;
+ 	if (!strncasecmp(core, "ptblank", 7) || !strncasecmp(core, "gunbulet", 8) || !strcasecmp(core, "NB1")) t.hs_ns = 32 * 165.3;   // NB-1 core: 32 px at 6.048 MHz
+ 	else if (!strcasecmp(core, "NES")) t.hs_ns = 4650.0;                                                                           // 25 dots at 5.37 MHz
++	// Sega Model 2 core: HSync is 64 pixels (m2_video_timing.sv H_SYNC_END - H_SYNC_START) in every video mode, native and 15 kHz
++	else if (!strcasecmp(core, "Model2") || !strncasecmp(core, "vcop", 4) || !strncasecmp(core, "daytona", 7) || !strcasecmp(core, "desert")) t.hs_ns = 64.0 * t.active_ns / t.width;
+ 
+ 	// recompute when the measured timing or the assumed pulse width changes (the core name can change while a core starts)
+ 	uint32_t sig = v->width * 31u + v->height * 17u + v->htime * 13u + v->ptime * 7u + v->de_h * 5u + v->de_v * 3u + v->frame_clocks + v->ctime * 23u + (v->interlaced ? 1u : 0u) + (uint32_t)t.hs_ns * 11u;
