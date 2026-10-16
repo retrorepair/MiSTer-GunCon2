@@ -16,12 +16,13 @@
    2026-10-17 log; the MRA is `Virtua Cop (Revision A) [15kHz CRT].mra`.
 2. **Test it in play** (the game flashes only in play, not in the attract demo): load `_Arcade/_gun_test/Virtua Cop (Revision A) [15kHz CRT].mra`,
    OSD `Crosshair` = `Off`, insert a coin, start, shoot. Report whether shots land and whether shooting off-screen reloads.
-3. **Time Crisis buttons**: which of the core's buttons is the trigger and which the pedal (`docs/CORES.md`).
+3. **Time Crisis**: loads and is mapped (trigger/pedal from its MRA), but its HSync width is unknown (closed core) and the game was never tried.
+4. **Kernel Y fix** (optional): `patches/kernel/` is a one-line driver patch. It needs a kernel rebuild and a new kernel image on the SD card; I did not do that.
 
 ## What is on the MiSTer (192.168.1.204, UART on COM3)
 
 RAM only, a reboot returns to stock:
-- `/tmp/dbg/MiSTer16` = patched app, patches 0001..0009 (build/MiSTer_tracker_debug, md5 dd89f3a7...) bind-mounted over `/media/fat/MiSTer`.
+- `/tmp/dbg/MiSTer17` = patched app, patches 0001..0010 (build/MiSTer_tracker_debug, md5 390bb02a...) bind-mounted over `/media/fat/MiSTer`.
 - `/tmp/dbg/Model2_20261016.rbf` (md5 644e28fa...) bind-mounted over `/media/fat/_Arcade/cores/Model2.rbf`, so MRAs that name `Model2`
   get the newer core. The original `Model2.rbf` on the card is untouched underneath.
 - `/tmp/archive/*` earlier logs (Point Blank, Time Crisis probes, Model 2 probes). `/tmp/guncal_apply.log` is the live timing log.

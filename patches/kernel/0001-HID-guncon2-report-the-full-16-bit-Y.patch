@@ -1,0 +1,27 @@
+From: retrorepair <joelwhybrow@googlemail.com>
+Subject: [PATCH] HID: guncon2: report the full 16-bit Y
+
+The GunCon 2's report is three little-endian 16-bit fields: buttons, X and Y. The driver
+reads X as 16 bits but takes only the low byte of Y (data[4]), so every line past 255
+wraps to 0, 1, 2... The gun counts lines since VSync, and a 15 kHz picture reaches line 257
+to 273 on several MiSTer cores (Terminator 2, Point Blank 2, Time Crisis), so the bottom of
+the screen reads as the top.
+
+A raw capture of the endpoint with the gun aimed at a lit picture (tools/mister/usbraw.py)
+shows data[5] is 0x01 in 143 of 1838 reports and 0x00 in all the others, as the high byte of
+Y would be.
+
+Not applied to any kernel by this repo: the MiSTer app works around it
+(lightgun_crt.cpp, CRTGUN_Y_WRAP) until the driver is fixed, then that block can go.
+---
+--- a/drivers/hid/hid-guncon2.c
++++ b/drivers/hid/hid-guncon2.c
+@@ -88,7 +88,7 @@
+     if (urb->actual_length == 6) {
+         /* Aiming */
+         x = (data[3] << 8) | data[2];
+-        y = data[4];
++        y = (data[5] << 8) | data[4];
+ 
+         input_report_abs(guncon2->input_device, ABS_X, x);
+         input_report_abs(guncon2->input_device, ABS_Y, y);

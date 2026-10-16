@@ -35,8 +35,12 @@ X. A per-core F10 calibration on the MiSTer overrides all of this.
 second action** (reload, bomb, grenade, pedal), **B -> Start**, the gun's **Start -> Coin**, **Select -> Service**. Games with only
 one action (Point Blank, Point Blank 2, Jurassic Park) keep the layout you tested: **A -> Start, B -> Coin**.
 
-**Y beyond 255.** The kernel driver keeps only the low byte of the gun's Y (see DESIGN.md), so rows past raw Y 255 cannot be reached:
-Terminator 2's bottom 18 lines, the last 1 or 2 of Time Crisis and Point Blank 2. Not caused by the mapping.
+**Y beyond 255.** The kernel driver keeps only the low byte of the gun's 16-bit Y (`y = data[4]`; the raw capture shows `data[5]` is 1 in 143
+of 1838 reports), so lines past 255 come back as 0, 1, 2... That would put the bottom of Terminator 2 (to line 273), Point Blank 2
+(257) and Time Crisis (256) at the top of the screen. The app puts the 256 back for lit reports in the wrapped lines
+(`CRTGUN_Y_WRAP`, patch 0010, flagged in the code as a platform limit; checked on the MiSTer with Terminator 2 by
+`tools/mister/fakegun_ywrap.py`). The real fix is the one-line kernel patch `patches/kernel/0001-HID-guncon2-report-the-full-16-bit-Y.patch`;
+it is **not applied** (it needs a kernel rebuild and a new `zImage` on the SD card, your call). Once it is, the app block can go.
 
 ## Sega Model 2 (Virtua Cop)
 

@@ -1,0 +1,131 @@
+From f7c244e41c1e1b9da11e877b77ceace360b68994 Mon Sep 17 00:00:00 2001
+From: retrorepair <joelwhybrow@googlemail.com>
+Date: Sat, 17 Oct 2026 00:47:56 +0100
+Subject: [PATCH] input: undo the kernel driver's 8-bit Y for pictures that
+ reach past line 255
+
+The kernel driver keeps only the low byte of the gun's 16-bit Y (data[4]), so a
+picture whose bottom is past line 255 (Terminator 2 to 273, Point Blank 2 to 257,
+Time Crisis to 256) has its last lines read as the top of the screen. A report
+with light whose Y falls in the wrapped lines has the 256 put back. A platform
+limit, flagged in the code; the driver fix is in patches/kernel/ and this block
+goes once it is applied.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ input.cpp                  |  2 +-
+ lightgun_crt.cpp           | 22 +++++++++++++++++++---
+ lightgun_crt.h             |  3 ++-
+ test/lightgun_crt_test.cpp | 29 ++++++++++++++++++++++++++++-
+ 4 files changed, 50 insertions(+), 6 deletions(-)
+
+diff --git a/input.cpp b/input.cpp
+index c6c7344..46c10bb 100644
+--- a/input.cpp
++++ b/input.cpp
+@@ -2279,7 +2279,7 @@ static void crtgun_feed(int i, const struct input_event *ev)
+ 
+ 	if (ev->type == EV_ABS && (ev->code == ABS_X || ev->code == ABS_Y))
+ 	{
+-		crtgun_set_axis(&crtgun[i], ev->code == ABS_X, ev->value);
++		crtgun_set_axis(&crtgun[i], ev->code == ABS_X, ev->value, &p);
+ 		crtgun_update(&crtgun[i], &p, now);
+ 	}
+ 	else if (ev->type == EV_KEY && ev->code == GUNCON2_TRIGGER_CODE)
+diff --git a/lightgun_crt.cpp b/lightgun_crt.cpp
+index 1449c82..1ae5832 100644
+--- a/lightgun_crt.cpp
++++ b/lightgun_crt.cpp
+@@ -6,10 +6,26 @@ void crtgun_reset(crtgun_state *s)
+ 	memset(s, 0, sizeof(*s));
+ }
+ 
+-void crtgun_set_axis(crtgun_state *s, bool is_x, int32_t value)
++// PLATFORM LIMIT, to be removed with the driver fix: the GunCon 2 reports Y as 16 bits, but the kernel driver
++// (drivers/hid/hid-guncon2.c: y = data[4]) keeps only the low byte, so line 256 arrives as 0, 257 as 1, and so on. A picture whose
++// bottom is past line 255 (Terminator 2, Point Blank 2, Time Crisis) would have its last lines read as the top of the screen. Those
++// wrapped values are never a real reading: nothing above the picture is lit, so a report WITH light whose Y falls in the wrapped
++// lines of the picture (plus CRTGUN_Y_WRAP_SLACK for the calibration's own error) has the 256 put back. Without light the Y is junk
++// and left alone. The proper fix is the one-line driver patch in patches/kernel/.
++#define CRTGUN_Y_WRAP        256
++#define CRTGUN_Y_WRAP_SLACK  2
++
++void crtgun_set_axis(crtgun_state *s, bool is_x, int32_t value, const crtgun_params *p)
+ {
+-	if (is_x) s->raw_x = value;
+-	else      s->raw_y = value;
++	if (is_x)
++	{
++		s->raw_x = value;
++		return;
++	}
++
++	if (p && p->ymax >= CRTGUN_Y_WRAP && value >= 0 && crtgun_valid(s, p) && value <= p->ymax - CRTGUN_Y_WRAP + CRTGUN_Y_WRAP_SLACK)
++		value += CRTGUN_Y_WRAP;
++	s->raw_y = value;
+ }
+ 
+ // The last valid sample is "interior" if it is at least edge_pct of the span away from every edge.
+diff --git a/lightgun_crt.h b/lightgun_crt.h
+index ae4b704..5834d7d 100644
+--- a/lightgun_crt.h
++++ b/lightgun_crt.h
+@@ -81,7 +81,8 @@ struct crtgun_state
+ void crtgun_reset(crtgun_state *s);
+ 
+ // Feed raw data, then call crtgun_update(). now_ms is the report time (kernel event time).
+-void crtgun_set_axis(crtgun_state *s, bool is_x, int32_t value);
++// p is needed for Y: see the wrap note in lightgun_crt.cpp.
++void crtgun_set_axis(crtgun_state *s, bool is_x, int32_t value, const crtgun_params *p);
+ void crtgun_set_trigger(crtgun_state *s, bool down, uint32_t now_ms, const crtgun_params *p);
+ 
+ // Recompute out_x / out_y / offscreen (call after any single event) ...
+diff --git a/test/lightgun_crt_test.cpp b/test/lightgun_crt_test.cpp
+index f878baa..e8793c7 100644
+--- a/test/lightgun_crt_test.cpp
++++ b/test/lightgun_crt_test.cpp
+@@ -20,7 +20,7 @@ struct Rig
+ 	const crtgun_params *pp;
+ 	Rig(uint32_t t0 = 1000) : t(t0), pp(&P) { crtgun_reset(&s); }
+ 	Rig(const crtgun_params *params, uint32_t t0 = 1000) : t(t0), pp(params) { crtgun_reset(&s); }
+-	void report(uint32_t at, int x, int y) { t = at; crtgun_set_axis(&s, true, x); crtgun_set_axis(&s, false, y); crtgun_update(&s, pp, t); crtgun_report(&s, pp, t); }
++	void report(uint32_t at, int x, int y) { t = at; crtgun_set_axis(&s, true, x, pp); crtgun_set_axis(&s, false, y, pp); crtgun_update(&s, pp, t); crtgun_report(&s, pp, t); }
+ 	void trigger(uint32_t at, bool down) { t = at; crtgun_set_trigger(&s, down, t, pp); crtgun_update(&s, pp, t); }
+ };
+ 
+@@ -237,8 +237,35 @@ static void test_each_pull_restarts_the_measurement()
+ 	CHECK(r.s.pub_x == 500 && r.s.pub_y == 200);
+ }
+ 
++// the kernel driver keeps only the low byte of Y: for a picture that reaches past line 255 a lit report in the wrapped lines is put back
++static void test_wrapped_y_is_restored_when_the_picture_reaches_past_255()
++{
++	crtgun_params q = P;
++	q.ymin = 22; q.ymax = 273;                 // Terminator 2: 18 picture lines past 255
++	Rig r(&q);
++	r.report(1000, 400, 5);                    // line 261, light
++	CHECK(r.s.raw_y == 261);
++	r.report(1020, 400, 17);                   // line 273, the last picture line
++	CHECK(r.s.raw_y == 273);
++	r.report(1040, 400, 19);                   // 3 lines past the picture: still the wrapped zone (slack 2)
++	CHECK(r.s.raw_y == 275);
++	r.report(1060, 400, 120);                  // the middle of the screen is never touched
++	CHECK(r.s.raw_y == 120);
++	r.report(1080, 400, 24);                   // just under the top of the picture
++	CHECK(r.s.raw_y == 24);
++	r.report(1100, 0, 5);                      // no light: junk Y is left alone
++	CHECK(r.s.raw_y == 5);
++
++	crtgun_params u = P;                       // a picture that ends before 256 never has anything unwrapped
++	u.ymin = 30; u.ymax = 250;
++	Rig r2(&u);
++	r2.report(1000, 400, 5);
++	CHECK(r2.s.raw_y == 5);
++}
++
+ int main()
+ {
++	test_wrapped_y_is_restored_when_the_picture_reaches_past_255();
+ 	test_tracking_passes_through();
+ 	test_never_seen_light_is_offscreen();
+ 	test_interior_dark_gap_holds_then_expires();
