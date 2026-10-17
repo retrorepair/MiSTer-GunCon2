@@ -53,7 +53,7 @@ your stock `MiSTer` binary on the SD card yet.
   - `0008` the Sega Model 2 core's HSync width (64 pixels)
   - `0009` sync pulse sizes per core in one table keyed by the core's own name (replaces game-name prefix tests; fixes Point Blank 2)
   - `0010` undoes the kernel driver's 8-bit Y for pictures that reach past line 255 (`patches/kernel/` has the real fix, not applied)
-  - `0011` a gun window in the mapping (where the core puts the gun's minimum/maximum); the NES core's PPU coordinates
+  - `0011` a gun window in the mapping (where the core puts the gun's minimum/maximum): the NES core's PPU coordinates, the Mega Drive core's line-based Y
 - `cores/GunCal/` the FPGA core (Quartus Lite 17.0, framework `sys/` fetched from Template_MiSTer at build time).
 - `scripts/` `build-main-mister.sh` (ARM build in WSL, runs the host tests, reproducible), `build-guncal.sh` (the core).
 - `tools/mister/` helpers for the MiSTer's UART console and on-device tests (`serial_run.py`, `console.ps1`, `usbraw.py`, `fakegun*.py`,

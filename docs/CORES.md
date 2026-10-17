@@ -91,10 +91,10 @@ FIFO, so these are the cores' idle pictures.
 |---|---|---|---|---|
 | NES (`NES`) | 284x242 (wide overscan) | 4.65 us / 3 | **its own PPU dots 0..255 and scanlines 0..239**, a window inside the picture: raw x 142..706, y 21..257 in this mode | A, B, Select, Start, FDS, Mic, **Zapper/Vaus Btn (bit 10)** |
 | SNES (`SNES`) | 512x224 | 4.7 us (assumed) / 3 | the visible picture (it scales to its own `vtotal`), so the default | `A(SS Fire), B(SS Cursor), X(SS TurboSw), Y(SS Pause), LT(SS Cursor), RT(SS Fire)`, Select, Start |
-| Mega Drive (`MegaDrive`) | 256x192 | 4.7 us (assumed) / 3 | not read yet | A, B, C, Start, Mode, X, Y, Z |
-| Master System (`SMS`) | 256x192 | 4.7 us (assumed) / 3 | not read yet | Fire 1, Fire 2, Pause, ... |
-| Atari 7800 | 372x224 | 4.7 us (assumed) / 3 | not read yet | Fire1, Fire2, Pause/B&W, Select, Reset(Start), ... |
-| PlayStation | not harvested | | | the card runs `MiSTer_Physical-CD` for this core, not the patched app |
+| Mega Drive / Mega-CD (`MegaDrive`, `MegaCD`) | 256x192 idle (games 256/320 x 224) | 4.7 us (assumed) / 3 | X over the picture width, **Y as a screen line (stick minus 8)**, so the stick spans lines -8..247: raw y 37..288 at 192 lines | A, B, C, Start, Mode, X, Y, Z |
+| Master System (`SMS`) | 256x192 | 4.7 us (assumed) / 3 | the visible picture (X = stick, Y scaled to the visible lines), so the default | Fire 1, Fire 2, Pause, ... |
+| Atari 7800 | 372x224 | 4.7 us (assumed) / 3 | not read | Fire1, Fire2, Pause/B&W, Select, Reset(Start), ... |
+| PlayStation, Mega-CD | not harvested | | | the card launches `/media/fat/MiSTer_Physical-CD` for CD cores, a separate build the patches do not cover |
 
 The NES window follows the core's overscan option (detected from the measured picture size): 256x224 and 256x240 (narrow), 283/284 x 242
 (wide). It is derived from `NES_video.sv`/`NES_zapper.sv` to about a pixel and has **not** been tried with the gun. The Zapper needs

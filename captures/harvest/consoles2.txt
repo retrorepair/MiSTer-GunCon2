@@ -1,0 +1,20 @@
+=== /media/fat/_Console/MegaCD_20260603.rbf
+MegaCD
+/media/fat/MiSTer_Physical-CD /media/fat/_Console/MegaCD_20260603.rbf
+/media/fat#
+--- log
+/media/fat#
+
+=== /media/fat/_Console/NES_20260823.rbf
+NES
+/media/fat/MiSTer /media/fat/_Console/NES_20260823.rbf
+/media/fat#
+--- log
+NES [NES]: video 0x0 htime 0 ptime 0 vtime 0 ctime 0 frame_clocks 0 de_h 0 de_v 0
+NES [NES]: confstr[67] J1,A,B,Select,Start,FDS,Mic,Zapper/Vaus Btn,PP/Mat 1,PP/Mat 2,PP/Mat 3,PP/Mat 4,PP/Mat 5,PP/Mat 6,PP/Mat 7,PP/Mat 8,PP/Mat 9,PP/Mat 10,PP/Mat 11,PP/Mat 12,Savestates
+NES [NES]: confstr[68] jn,A,B,Select,Start,L,,R|P
+NES [NES]: confstr[69] jp,B,Y,Select,Start,L,,R|P
+NES [NES]: video 284x242 htime 6350 ptime 5289 vtime 1663934 ctime 2272 frame_clocks 714736 de_h 192 de_v 15
+NES [NES]: picture 284x242 active 52890 ns, hs 4650 ns (vs 3 lines), de_h 4470 ns, de_v 15, gun window -> raw x 142..706, y 21..257
+/media/fat#
+

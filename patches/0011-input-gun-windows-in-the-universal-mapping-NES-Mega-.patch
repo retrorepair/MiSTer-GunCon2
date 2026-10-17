@@ -1,23 +1,27 @@
-From 3940063448c3e8752ee0bc1db51b54f39c685e79 Mon Sep 17 00:00:00 2001
+From 807610a6a7d511ef1c5f56e52c5029b312778e99 Mon Sep 17 00:00:00 2001
 From: retrorepair <joelw@localhost>
 Date: Sat, 17 Oct 2026 01:11:55 +0100
-Subject: [PATCH] input: the NES core's gun window in the universal mapping
+Subject: [PATCH] input: gun windows in the universal mapping (NES, Mega Drive)
 
-The NES core scales the gun over its PPU's own dots 0..255 and scanlines 0..239,
-which sit at an offset inside the picture it outputs (13 or 14 columns in on the
-wide overscan modes, one column out and 8 rows out on the narrow 224-line one).
-guncal_core_timing gets an optional window (where the stick's minimum and maximum
-fall, in picture pixels); the NES windows come from NES_video.sv / NES_zapper.sv
-and are told apart by the measured picture size. Derived from source, within a
-pixel, not yet checked with the gun.
+Some cores do not scale the gun over the picture they output. The mapping can now
+place the stick's minimum and maximum anywhere in the picture (guncal_core_timing
+has an optional window, in picture pixels, which may lie outside it).
+
+NES: the core scales over its PPU's own dots 0..255 and scanlines 0..239, which sit at
+an offset inside the picture (13 or 14 columns in on the wide overscan modes, one
+column and 8 rows out on the narrow 224-line one); told apart by the measured size.
+Mega Drive and Mega-CD: X over the picture width, but Y as a screen line directly
+(lg_y = stick - 8), so the stick spans lines -8..247 (Genesis_MiSTer lightgun.sv).
+
+Derived from the cores' source, within a pixel, not yet checked with the gun.
 
 Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
 ---
  guncal.cpp           | 13 +++++++++----
  guncal.h             |  5 +++++
- input.cpp            | 20 ++++++++++++++++++--
+ input.cpp            | 28 ++++++++++++++++++++++++++--
  test/guncal_test.cpp | 27 ++++++++++++++++++++++++---
- 4 files changed, 56 insertions(+), 9 deletions(-)
+ 4 files changed, 64 insertions(+), 9 deletions(-)
 
 diff --git a/guncal.cpp b/guncal.cpp
 index 87dd30b..0a14b28 100644
@@ -63,10 +67,10 @@ index 138075a..bf79067 100644
  
  // Where the GunCal core puts things relative to its sync pulses: the picture starts 94 pixels (of 100 ns) after HSync
 diff --git a/input.cpp b/input.cpp
-index 46c10bb..b9f7b02 100644
+index 46c10bb..cb5bdea 100644
 --- a/input.cpp
 +++ b/input.cpp
-@@ -2126,6 +2126,20 @@ static const guncal_sync_entry guncal_sync_table[] =
+@@ -2126,6 +2126,27 @@ static const guncal_sync_entry guncal_sync_table[] =
  	{ "NES",      0, 4650, 3, "NES core: 25 dots at 5.37 MHz" },
  };
  
@@ -84,10 +88,17 @@ index 46c10bb..b9f7b02 100644
 +	else if (t->width == 283 && t->height == 242) { t->wx0 = 13; t->wx1 = 268; t->wy0 = 1;  t->wy1 = 240; t->has_window = 1; }
 +}
 +
++// The Mega Drive core (Genesis_MiSTer rtl/lightgun.sv) takes the gun's X over the whole picture width, but its Y as a screen line
++// directly, not scaled to the picture: lg_y = stick - 8 (clamped), so the stick's 0..255 spans lines -8..247.
++static void megadrive_gun_window(guncal_core_timing *t)
++{
++	t->wx0 = 0; t->wx1 = t->width - 1; t->wy0 = -8; t->wy1 = 247; t->has_window = 1;
++}
++
  // Record what the framework measured of the running core's video (one line per change). This is what the mapping below
  // is derived from, and the only way to see why it was skipped for a core (interlaced, incomplete, out of range).
  static void guncal_log_video(const char *core, const VideoInfo *v)
-@@ -2180,6 +2194,7 @@ static void guncal_apply_universal(int i)
+@@ -2180,6 +2201,7 @@ static void guncal_apply_universal(int i)
  		: (double)v->ptime * 10.0 / (double)v->ctime;
  
  	guncal_core_timing t;
@@ -95,15 +106,16 @@ index 46c10bb..b9f7b02 100644
  	t.de_h_ns   = v->de_h * clk_vid_ns;
  	t.de_v      = v->de_v;
  	t.active_ns = v->ptime * 10.0;
-@@ -2197,6 +2212,7 @@ static void guncal_apply_universal(int i)
+@@ -2197,6 +2219,8 @@ static void guncal_apply_universal(int i)
  		t.vs_lines = se->vs_lines;
  		break;
  	}
 +	if (!strcasecmp(board, "NES")) nes_gun_window(&t);
++	else if (!strcasecmp(board, "MegaDrive") || !strcasecmp(board, "MegaCD")) megadrive_gun_window(&t);
  
  	// recompute when the measured timing or the assumed pulse width changes (the core name can change while a core starts)
  	uint32_t sig = v->width * 31u + v->height * 17u + v->htime * 13u + v->ptime * 7u + v->de_h * 5u + v->de_v * 3u + v->frame_clocks + v->ctime * 23u + (v->interlaced ? 1u : 0u) + (uint32_t)t.hs_ns * 11u + (uint32_t)t.vs_lines * 29u;
-@@ -2215,8 +2231,8 @@ static void guncal_apply_universal(int i)
+@@ -2215,8 +2239,8 @@ static void guncal_apply_universal(int i)
  		FILE *lf = fopen("/tmp/guncal_apply.log", "a");
  		if (lf)
  		{

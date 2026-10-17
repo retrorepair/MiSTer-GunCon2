@@ -1,0 +1,37 @@
+=== /media/fat/_Console/MegaDrive_20260603.rbf
+MegaDrive
+/media/fat/MiSTer /media/fat/_Console/MegaDrive_20260603.rbf
+/media/fat#
+--- log
+MegaDrive [MegaDrive]: video 0x0 htime 0 ptime 0 vtime 0 ctime 0 frame_clocks 0 de_h 0 de_v 0
+MegaDrive [MegaDrive]: confstr[52] J1,A,B,C,Start,Mode,X,Y,Z
+MegaDrive [MegaDrive]: confstr[53] jn,A,B,R,Start,Select,X,Y,L
+MegaDrive [MegaDrive]: confstr[54] jp,Y,B,A,Start,Select,L,X,R
+MegaDrive [MegaDrive]: video 256x192 htime 6369 ptime 4768 vtime 1668814 ctime 5120 frame_clocks 0 de_h 780 de_v 40
+MegaDrive [MegaDrive]: picture 256x192 active 47680 ns, hs 4700 ns (vs 3 lines), de_h 7264 ns, de_v 40, gun window -> raw x 145..709, y 37..288
+/media/fat#
+
+=== /media/fat/_Console/SMS_20260823.rbf
+SMS
+/media/fat/MiSTer /media/fat/_Console/SMS_20260823.rbf
+/media/fat#
+--- log
+SMS [SMS]: video 0x0 htime 0 ptime 0 vtime 0 ctime 0 frame_clocks 0 de_h 0 de_v 0
+SMS [SMS]: confstr[69] J1,Fire 1,Fire 2,Pause,-,-,Soft Reset,-,-,SaveState
+SMS [SMS]: confstr[70] jn,A|P,B,Start,Coin,X,Select
+SMS [SMS]: confstr[71] jp,Y|P,A,Start,Coin,X,Select
+SMS [SMS]: video 256x192 htime 6368 ptime 4768 vtime 1668815 ctime 2560 frame_clocks 896040 de_h 380 de_v 37
+SMS [SMS]: picture 256x192 active 47680 ns, hs 4700 ns (vs 3 lines), de_h 7077 ns, de_v 37 -> raw x 142..707, y 42..230
+/media/fat#
+
+=== /media/fat/_Console/SNES_20260823.rbf
+SNES
+/media/fat/MiSTer /media/fat/_Console/SNES_20260823.rbf
+/media/fat#
+--- log
+SNES [SNES]: video 0x0 htime 0 ptime 0 vtime 0 ctime 0 frame_clocks 0 de_h 0 de_v 0
+SNES [SNES]: confstr[60] J1,A(SS Fire),B(SS Cursor),X(SS TurboSw),Y(SS Pause),LT(SS Cursor),RT(SS Fire),Select,Start,SaveState
+SNES [SNES]: video 512x224 htime 6350 ptime 4768 vtime 1663916 ctime 2048 frame_clocks 714728 de_h 324 de_v 24
+SNES [SNES]: picture 512x224 active 47680 ns, hs 4700 ns (vs 3 lines), de_h 7543 ns, de_v 24 -> raw x 148..713, y 29..249
+/media/fat#
+
