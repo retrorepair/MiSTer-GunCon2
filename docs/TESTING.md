@@ -17,15 +17,14 @@ which way it is off at the left/right/top/bottom edges, (c) does shooting off th
 
 ## 1. Virtua Cop (Sega Model 2) — you asked for this first
 
-**Blocked on ROMs.** `Y:\MiSTer\mame\vcopa.zip` holds 2 of the 23 files. Needed in the same folder: the parent `vcop.zip` and
-`model1io2.zip` (the full list is in `docs/CORES.md`). I did not look for them.
+The ROM set is complete now (`vcopa.zip` + `vcop.zip` + `model1io2.zip`; all 23 files the MRA names are present with the right CRCs) and the game
+is **loaded on the MiSTer**: `_Arcade/_gun_test/Virtua Cop (Revision A) [15kHz CRT].mra`. The core reports 496x384 at 15.7 kHz and the app has the
+picture at raw x 159..729, y 47..235. In the core's OSD set **Crosshair = Off** (a real gun does not need it). Then insert a coin, press Start and
+shoot: **the game only flashes in play**, not in the attract demo. Buttons: trigger, A = Reload, B = Start, gun Start = Coin.
+Could be wrong: the `Gun reload` option (leave `Shoot off-screen`); the flash itself (first time measured in this game).
+What to report: do shots land, which way they are off at the left/right/top/bottom edges, does shooting off the screen reload.
 
-Then: load `_Arcade/_gun_test/Virtua Cop (Revision A) [15kHz CRT].mra`. In the core's OSD set **Crosshair = Off** (a real gun does not need it).
-Insert a coin, press Start, and shoot: **the game only flashes in play**, not in the attract demo. Everything else is already derived:
-15.7 kHz interlaced, picture edges raw x 159..729 / y 47..235, sync 6.2 us / 3 lines.
-Could be wrong: the core's `Gun reload` option (leave `Shoot off-screen`); the flash itself (first time measured in this game).
-
-## 2. Time Crisis (Namco Super System 22 core on the card)
+## 2. Time Crisis — PARKED (the core is not mature enough yet; your call, 2026-10-17)
 
 Load `_Arcade/Time Crisis (World, TS2 Ver.B).mra`. 640x480 interlaced at 15.7 kHz, so the gun can lock. Mapped: trigger, **A = pedal**, B = Start,
 gun Start = Coin.

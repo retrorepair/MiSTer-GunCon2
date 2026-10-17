@@ -96,9 +96,9 @@ FIFO, so these are the cores' idle pictures.
 | Core | Idle picture | HSync / VSync | Gun space | Buttons (core's `J1`) |
 |---|---|---|---|---|
 | NES (`NES`) | 284x242 (wide overscan) | 4.65 us / 3 | **its own PPU dots 0..255 and scanlines 0..239**, a window inside the picture: raw x 142..706, y 21..257 in this mode | A, B, Select, Start, FDS, Mic, **Zapper/Vaus Btn (bit 10)** |
-| SNES (`SNES`) | 512x224 | 4.7 us (assumed) / 3 | the visible picture (it scales to its own `vtotal`), so the default | `A(SS Fire), B(SS Cursor), X(SS TurboSw), Y(SS Pause), LT(SS Cursor), RT(SS Fire)`, Select, Start |
-| Mega Drive / Mega-CD (`MegaDrive`, `MegaCD`) | 256x192 idle (games 256/320 x 224) | 4.7 us (assumed) / 3 | X over the picture width, **Y as a screen line (stick minus 8)**, so the stick spans lines -8..247: raw y 37..288 at 192 lines | A, B, C, Start, Mode, X, Y, Z |
-| Master System (`SMS`) | 256x192 | 4.7 us (assumed) / 3 | the visible picture (X = stick, Y scaled to the visible lines), so the default | Fire 1, Fire 2, Pause, ... |
+| SNES (`SNES`) | 512x224 | 4.28 us (23 dots) / 3, from `PPU.vhd` | the visible picture (it scales to its own `vtotal`), so the default | `A(SS Fire), B(SS Cursor), X(SS TurboSw), Y(SS Pause), LT(SS Cursor), RT(SS Fire)`, Select, Start |
+| Mega Drive / Mega-CD (`MegaDrive`, `MegaCD`) | 256x192 idle (games 256/320 x 224) | 23 px (256-wide) or 21 px (320-wide) / 4, from `vdp_common.vhd` | X over the picture width, **Y as a screen line (stick minus 8)**, so the stick spans lines -8..247: raw y 37..288 at 192 lines | A, B, C, Start, Mode, X, Y, Z |
+| Master System (`SMS`) | 256x192 | 24 px (4.47 us) / 3, from `video.vhd` | the visible picture (X = stick, Y scaled to the visible lines), so the default | Fire 1, Fire 2, Pause, ... |
 | Atari 7800 | 372x224 | 4.7 us (assumed) / 3 | not read | Fire1, Fire2, Pause/B&W, Select, Reset(Start), ... |
 | PlayStation, Mega-CD | not harvested | | | the card launches `/media/fat/MiSTer_Physical-CD` for CD cores, a separate build the patches do not cover |
 

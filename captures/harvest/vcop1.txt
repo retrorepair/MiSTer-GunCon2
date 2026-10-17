@@ -1,0 +1,11 @@
+=== /media/fat/_Arcade/_gun_test/Virtua Cop (Revision A) [15kHz CRT].mra
+vcopa
+/media/fat/MiSTer /media/fat/_Arcade/cores/Model2.rbf /media/fat/_Arcade/_gun_test/Virtua Cop (Revision A) [15kHz CRT].mra
+/media/fat#
+--- log
+vcopa [Model2]: video 0x0 htime 0 ptime 0 vtime 0 ctime 0 frame_clocks 0 de_h 0 de_v 0
+vcopa [Model2]: confstr[24] J1,Coin,Start,Test,Service,VR1 Red,VR4 Green,Accel,Brake,Gear Up,Gear Down,VR2 Blue,VR3 Yellow
+vcopa [Model2]: video 496x384 interlaced htime 6355 ptime 4805 vtime 1738399 ctime 4805 frame_clocks 3476800 de_h 698 de_v 42
+vcopa [Model2]: picture 496x384 interlaced active 48050 ns, hs 6200 ns (vs 3 lines), de_h 6980 ns, de_v 42 -> raw x 159..729, y 47..235
+/media/fat#
+
