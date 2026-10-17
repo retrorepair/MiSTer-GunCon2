@@ -80,3 +80,28 @@ buttons: that was wrong. I had only read the first and last few KB of the 2.5 MB
 Measured on the card's build: 640x480 interlaced; 15.7 kHz lines, so the GunCon 2 can lock. The mapping handles the interlace (the picture
 spans 240 gun lines), and puts the picture at raw x 131..724 and y 20..256. The bottom edge sits at the kernel driver's 8-bit
 limit for Y (255), so the last row or two cannot be reached until the driver passes the full Y.
+
+## Console cores (core file loaded alone, no game)
+
+Measured with `tools/mister/harvest_cores.py` (`captures/harvest/consoles1.txt`). A console core's picture size depends on the game
+(and for the NES on its overscan option); the mapping is recomputed whenever it changes. The MiSTer cannot load a game from the command
+FIFO, so these are the cores' idle pictures.
+
+| Core | Idle picture | HSync / VSync | Gun space | Buttons (core's `J1`) |
+|---|---|---|---|---|
+| NES (`NES`) | 284x242 (wide overscan) | 4.65 us / 3 | **its own PPU dots 0..255 and scanlines 0..239**, a window inside the picture: raw x 142..706, y 21..257 in this mode | A, B, Select, Start, FDS, Mic, **Zapper/Vaus Btn (bit 10)** |
+| SNES (`SNES`) | 512x224 | 4.7 us (assumed) / 3 | the visible picture (it scales to its own `vtotal`), so the default | `A(SS Fire), B(SS Cursor), X(SS TurboSw), Y(SS Pause), LT(SS Cursor), RT(SS Fire)`, Select, Start |
+| Mega Drive (`MegaDrive`) | 256x192 | 4.7 us (assumed) / 3 | not read yet | A, B, C, Start, Mode, X, Y, Z |
+| Master System (`SMS`) | 256x192 | 4.7 us (assumed) / 3 | not read yet | Fire 1, Fire 2, Pause, ... |
+| Atari 7800 | 372x224 | 4.7 us (assumed) / 3 | not read yet | Fire1, Fire2, Pause/B&W, Select, Reset(Start), ... |
+| PlayStation | not harvested | | | the card runs `MiSTer_Physical-CD` for this core, not the patched app |
+
+The NES window follows the core's overscan option (detected from the measured picture size): 256x224 and 256x240 (narrow), 283/284 x 242
+(wide). It is derived from `NES_video.sv`/`NES_zapper.sv` to about a pixel and has **not** been tried with the gun. The Zapper needs
+`Peripheral: Zapper(Joy1)` and `Zapper Trigger: Joystick` set in the core's OSD, and the gun's map at `config/inputs/NES_input_0b9a_016a_v3.map`
+(trigger -> bit 10).
+
+**Lesson (cost an hour):** `load_core` takes a core `.rbf` or an arcade `.mra` only. Given a ROM (`.nes`) it programs the FPGA with the ROM
+as if it were a bitstream, the FPGA is left unconfigured, the app then refuses to start, and a write to `/dev/MiSTer_cmd` blocks the console
+for good. Recovery without a reboot (a reboot would put the console back at its login prompt): run a build of the app that programs the
+FPGA from the command line when it is unconfigured (a one-off; `MiSTer /media/fat/menu.rbf`).
