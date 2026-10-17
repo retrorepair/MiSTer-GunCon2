@@ -43,7 +43,7 @@ your stock `MiSTer` binary on the SD card yet.
 
 ## What is in this repo
 
-- `patches/` twelve patches to Main_MiSTer 13f1de9, in order:
+- `patches/` thirteen patches to Main_MiSTer 13f1de9, in order:
   - `0001` `GUNDBG=1` raw trace of every GunCon event and tracker decision (measurement only)
   - `0002` the continuous tracker (`lightgun_crt.cpp`), `MiSTer.ini` keys, calibration safety fixes (no divide by zero)
   - `0003` GunCal support: the calibration sequence and maths (`guncal.cpp`), the universal mapping onto a core, the core drive code
@@ -56,6 +56,7 @@ your stock `MiSTer` binary on the SD card yet.
   - `0010` undoes the kernel driver's 8-bit Y for pictures that reach past line 255 (`patches/kernel/` has the real fix, not applied)
   - `0011` a gun window in the mapping (where the core puts the gun's minimum/maximum): the NES core's PPU coordinates, the Mega Drive core's line-based Y
   - `0012` exact sync pulse sizes for the SNES, Master System and Mega Drive cores, read from their sources
+  - `0013` the Model 2 core's off-screen band put outside the picture (it ate a strip at every edge of the screen)
 - `cores/GunCal/` the FPGA core (Quartus Lite 17.0, framework `sys/` fetched from Template_MiSTer at build time).
 - `scripts/` `build-main-mister.sh` (ARM build in WSL, runs the host tests, reproducible), `build-guncal.sh` (the core).
 - `tools/mister/` helpers for the MiSTer's UART console and on-device tests (`serial_run.py`, `console.ps1`, `usbraw.py`, `fakegun*.py`,

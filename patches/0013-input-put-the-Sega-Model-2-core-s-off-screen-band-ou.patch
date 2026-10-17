@@ -1,0 +1,53 @@
+From 42598c0322ebee81e6e617d15aff3df21130d4b6 Mon Sep 17 00:00:00 2001
+From: retrorepair <joelwhybrow@googlemail.com>
+Date: Sat, 17 Oct 2026 09:18:34 +0100
+Subject: [PATCH] input: put the Sega Model 2 core's off-screen band outside
+ the picture
+
+The core marks the outer ~5% of the stick range off-screen (a stick or mouse reloads
+that way). A real gun goes off-screen by losing light, which the pointer already
+reports, so mapping the stick edge to edge over the picture left that band as a dead
+zone around every edge of the screen. The gun window now puts the picture's first and
+last column / row on the first and last on-screen stick values and extends the range
+past it by the rest, from the core's own arithmetic (m2_vcop_guns.sv).
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ input.cpp | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/input.cpp b/input.cpp
+index 6126302..dd832a6 100644
+--- a/input.cpp
++++ b/input.cpp
+@@ -2149,6 +2149,22 @@ static void megadrive_gun_window(guncal_core_timing *t)
+ 	t->wx0 = 0; t->wx1 = t->width - 1; t->wy0 = -8; t->wy1 = 247; t->has_window = 1;
+ }
+ 
++// The Sega Model 2 core (Virtua Cop, rtl/io/m2_vcop_guns.sv) treats the outer ~5% of the stick range as OFF-SCREEN, which is how a
++// stick or mouse reloads (MAME's border). A real gun goes off-screen by losing light, which the pointer already reports, so that band
++// must lie outside the picture instead of eating its edges. From the core's own arithmetic (stick u = 0..255 -> pixel u*496/256 ->
++// game units, off-screen when X <= 0x09b or >= 0x25e, Y <= 0x037 or >= 0x196) the on-screen sticks are u = 13..243 for X and
++// 13..242 for Y: the picture's first and last column / row are put on those, and the window extends past the picture by the rest.
++static void model2_gun_window(guncal_core_timing *t)
++{
++	const double xlo = 13, xhi = 243, ylo = 13, yhi = 242;
++	double w = t->width - 1, h = t->height - 1;
++	t->wx0 = -xlo * w / (xhi - xlo);
++	t->wx1 = w + (255 - xhi) * w / (xhi - xlo);
++	t->wy0 = -ylo * h / (yhi - ylo);
++	t->wy1 = h + (255 - yhi) * h / (yhi - ylo);
++	t->has_window = 1;
++}
++
+ // Record what the framework measured of the running core's video (one line per change). This is what the mapping below
+ // is derived from, and the only way to see why it was skipped for a core (interlaced, incomplete, out of range).
+ static void guncal_log_video(const char *core, const VideoInfo *v)
+@@ -2222,6 +2238,7 @@ static void guncal_apply_universal(int i)
+ 		break;
+ 	}
+ 	if (!strcasecmp(board, "NES")) nes_gun_window(&t);
++	else if (!strcasecmp(board, "Model2")) model2_gun_window(&t);
+ 	else if (!strcasecmp(board, "MegaDrive") || !strcasecmp(board, "MegaCD"))
+ 	{
+ 		// vdp_common.vhd: HSync is 23 pixels in the 256-wide mode and 21 in the 320-wide one, VSync 4 lines (VS_LINES)

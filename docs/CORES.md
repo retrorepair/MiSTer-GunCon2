@@ -14,7 +14,7 @@ How to read the columns:
 | Game (core's own name) | Source | Picture (measured) | HSync / VSync | Picture edges, gun raw | Buttons (see below) | Tested |
 |---|---|---|---|---|---|---|
 | Point Blank (NB1) | `kyledlester/Namco_NB1_MiSTer` | 288x224 progressive | 32 px / 3 lines | x 148..712, y 30..250 | trigger 4, A Start, B Coin, Select Service | **on hardware, "basically perfect"** |
-| Virtua Cop (Model2) | `alphanu1/sega-model2-mister` | 496x384 **interlaced**, 15.7 kHz | 64 px / 3 | x 159..729, y 47..235 | trigger, A Reload, B Start, gun Start Coin | map and timing yes; shooting needs the full ROM set |
+| Virtua Cop (Model2) | `alphanu1/sega-model2-mister` | 496x384 **interlaced**, 15.7 kHz | 64 px / 3 | x 127..759, y 36..246 (a gun window: the core's 5% off-screen band is put outside the picture) | trigger, A Reload, B Start, gun Start Coin | map and timing yes; shooting needs the full ROM set |
 | Time Crisis (SUPER22) | binary only | 640x480 **interlaced** | **unknown**, 4.7 us / 3 assumed | x 131..724, y 20..256 | trigger, A Pedal, B Start, gun Start Coin | not yet |
 | Lethal Enforcers II (KonamiGX) | `ppriest/Arcade-KonamiGX_MiSTer` | 288x224 | 32 px / 8 (estimate) | x 163..731, y 26..246 | trigger, A Reload, B Start, gun Start Coin | not yet |
 | Alien3 / Jurassic Park (S32) | `meathax/s32` | 320x224 | 32 px / 3 | x 124..713, y 31..251 | trigger, A (Alien3: second button), B Start, gun Start Coin | not yet |
@@ -123,3 +123,13 @@ support for that core): your call.
 This is where the Saturn **Virtua Cop** (and Virtua Cop 2: `Saturn/Virtua Cop (USA) (6S).chd` etc. are on the share) lives. The Saturn core has the
 option `Pad 1 = Virt LGun`, with `LGun P1 XY Ctrl = Joy 1 / Mouse` and `LGun P1 Buttons = Joy 1 / Mouse` (`Saturn.sv`), and a lightgun module
 derived from the Mega Drive's. So it takes an absolute joystick-analog position, the same shape as the cores above, once the mapping applies.
+
+## Virtua Cop: first test on the real gun (2026-10-17)
+
+Works, off-screen reload works. Reported: a large dead zone at the left and top, a narrow one at the right and bottom. What the logs of that session
+(470 pulls, `tools/mister/edge_stats.py`, `pulls_by_region.py`, `light_edges.py`) showed: the gun saw light from raw X 160 to about 735 and Y about 35 to
+229, so the assumed picture edges (x 159..729, y 47..235) were right in X and perhaps 5 to 10 high at the top in Y; pulls with light before them
+ended on-screen in every part of the picture. The core itself marks the outer ~4.7% of the stick range off-screen on every side (a stick or mouse
+reloads that way), which, with the stick mapped edge to edge over the picture, left a band at each edge where a shot counted as off-screen. Patch
+0013 puts that band outside the picture. Not explained by this: the left/right and top/bottom difference. If it remains, the next step is four pulls
+at the very edges of the lit picture to measure it.
