@@ -19,9 +19,9 @@ How to read the columns:
 | Lethal Enforcers II (KonamiGX) | `ppriest/Arcade-KonamiGX_MiSTer` | 288x224 | 32 px / 8 (estimate) | x 163..731, y 26..246 | trigger, A Reload, B Start, gun Start Coin | not yet |
 | Alien3 / Jurassic Park (S32) | `meathax/s32` | 320x224 | 32 px / 3 | x 124..713, y 31..251 | trigger, A (Alien3: second button), B Start, gun Start Coin | not yet |
 | Line of Fire (SXB) | `MiSTer-devel/Arcade-SegaXBoard_MiSTer` | 320x224 | 32 px / 4 | x 124..731, y 24..244 | trigger, A Bomb, B Start, gun Start Coin | not yet |
-| Point Blank 2 (SYSTEM11) | `XelaNotPu/SYSTEM11_MiSTer` | 352x240 | 4.69 us / 3 | x 115..736, y 21..257 | trigger, A Start, B Coin | not yet |
+| Point Blank 2 (SYSTEM11) | `XelaNotPu/SYSTEM11_MiSTer` | 352x240 | 4.69 us / 3 | x 115..736, y 21..257 | trigger, A Start, B Coin | **core takes a mouse (P1) / stick velocity (P2), no absolute gun input: expect it not to work** |
 | Terminator 2 (A.YUNIT) | closed (blahm1d) | 410x256 | **unknown**, 4.7 us assumed | x 130..737, y 22..273 | trigger, A Bomb, B Start, gun Start Coin | not yet |
-| Rambo III (TaitoB) | `Mezzow/Arcade-TaitoB_MiSTer` | 320x224 | **64 px = 9.4 us** / 3 | x 174..732, y 27..247 | trigger, A Button 2, B Start, gun Start Coin | not yet |
+| Rambo III (TaitoB) | `Mezzow/Arcade-TaitoB_MiSTer` | 320x224 | **64 px = 9.4 us** / 3 | x 174..732, y 27..247 | trigger, A Button 2, B Start, gun Start Coin | core reads only the stick's X (rotary): gun probably unsupported |
 | Laser Ghost (JTS18) | `jotego/jtcores` | 320x224 | unknown, 4.7 us assumed | x 122..753, y 24..244 | trigger, A Special Weapon, B Start, gun Start Coin | not yet |
 | Operation Wolf (JTRASTAN) | `jotego/jtcores` | 320x240 | unknown, 4.7 us assumed | x 144..712, y 19..255 | trigger, A Grenade, B Start, gun Start Coin | not yet |
 

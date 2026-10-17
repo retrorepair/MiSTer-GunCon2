@@ -13,6 +13,7 @@ your stock `MiSTer` binary on the SD card yet.
 | [docs/CALIBRATION-CORE.md](docs/CALIBRATION-CORE.md) | The GunCal core: the calibration flow, the pages, how it fits together |
 | [docs/DESIGN.md](docs/DESIGN.md) | Measured evidence, the design and why, limits, how to test |
 | [docs/CORES.md](docs/CORES.md) | Per core: where it came from, its measured video, sync width, buttons, and whether it has been tested |
+| [docs/TESTING.md](docs/TESTING.md) | What to try first, per game, with exact OSD settings and what could be wrong |
 | [HANDOFF.md](HANDOFF.md) | What is running on the MiSTer now and what is next |
 
 ## How it works
