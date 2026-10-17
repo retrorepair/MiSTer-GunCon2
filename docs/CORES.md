@@ -25,6 +25,12 @@ How to read the columns:
 | Laser Ghost (JTS18) | `jotego/jtcores` | 320x224 | unknown, 4.7 us assumed | x 122..753, y 24..244 | trigger, A Special Weapon, B Start, gun Start Coin | not yet |
 | Operation Wolf (JTRASTAN) | `jotego/jtcores` | 320x240 | unknown, 4.7 us assumed | x 144..712, y 19..255 | trigger, A Grenade, B Start, gun Start Coin | not yet |
 
+**Scope.** Only games that originally used an optical gun (which flashes the screen for it) can work with the GunCon 2: Point Blank, Time
+Crisis, Lethal Enforcers, Virtua Cop (it flashes in play), the NES Zapper, Super Scope, Menacer, Light Phaser, Stunner games. Games that
+used analog guns (Alien3, Jurassic Park, Terminator 2, probably Line of Fire, Operation Wolf, Rambo III, Laser Ghost) never flash and are not
+a goal; their rows are kept as measurements only. What is per core is only what the framework does not tell us (the sync widths and, for two
+console cores, where the gun's coordinates sit in the picture), not per game.
+
 "Picture edges" is what the universal mapping derives for the gun's raw X and Y at the picture's left/right/top/bottom, from the
 GunCal calibration of 2026-10-16 plus the timing in `captures/harvest/round3.txt`. **HSync / VSync** come from each core's source and
 are what the framework cannot measure; "unknown" falls back to 4.7 us and 3 lines, which can be a few percent of the screen out in

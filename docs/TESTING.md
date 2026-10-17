@@ -40,21 +40,7 @@ Load `_Arcade/Lethal Enforcers II - Gun Fighters (ver EAA).mra`. OSD: **Crosshai
 Could be wrong: the GX sync width is the game-programmed value I estimated (32 px / 8 lines); a visible left/right or up/down offset that is the
 same everywhere points there.
 
-## 4. Alien3 and Jurassic Park (Sega System 32 core)
-
-Load the MRA from `_Arcade/`. OSD: **P1 Gun Input = Stick/USB Gun/Sinden** (the default), **Gun Crosshair = Off**, Gun Sensitivity does not matter
-for an absolute gun. Mapped: trigger, Alien3 A = second button, B = Start (Jurassic Park: A = Start, B = Coin). Derived: 32 px / 3 lines.
-
-## 5. Line of Fire (Sega X Board core)
-
-OSD: **Gun control = Lightgun** (not Gamepad). Mapped: trigger, A = bomb, B = Start. Derived: 32 px / 4 lines.
-
-## 6. Terminator 2 (Midway Y unit core, closed)
-
-Mapped: trigger, A = bomb, B = Start, gun Start = Coin. 410x256 with the picture reaching raw Y 273: the app now puts back the lines
-the kernel driver drops (checked with a virtual gun, not a real one). HSync width unknown (4.7 us assumed).
-
-## 7. Point Blank 2 (Namco System 11 core): expect it NOT to work with the GunCon 2 as is
+## 4. Point Blank 2 (Namco System 11 core): expect it NOT to work with the GunCon 2 as is
 
 Read from the core's source (`SYSTEM11.sv`): player 1's aim comes from a **PS/2 mouse** (relative movements accumulated into a pointer), and
 player 2's from the second pad's stick used as a **velocity**. It has no absolute-position input, so the GunCon 2's absolute aim has nothing
@@ -62,17 +48,19 @@ to attach to (the trigger would still work). The author's fork `misteraddons/SYS
 is a different gun. To make this work the app would have to present the GunCon 2 as a mouse (turning its absolute position into movements
 that drive the core's pointer); that is new work, not done, and it is your call whether it is wanted.
 
-## 8. Rambo III, Laser Ghost, Operation Wolf
-
-Mapped from their MRAs (trigger + second weapon; Start/Coin). Sync widths: Taito B is 64 px (9.4 us, from its source); the two jotego cores
-(Laser Ghost, Operation Wolf) are assumed 4.7 us. **Rambo III** is probably unsupported: the Taito B core reads only the stick's X axis (as a
-rotary/paddle input); its README lists Rambo III as playable with a joystick and says nothing of a gun.
-
-## 9. NES Duck Hunt
+## 5. NES Duck Hunt
 
 Load the NES core and the game from the menu. OSD: **Peripheral = Zapper(Joy1)**, **Zapper Trigger = Joystick**. Map: trigger -> `Zapper/Vaus Btn`.
 The Zapper reads the PPU's own coordinates, which sit at an offset inside the output; the app places them for the three overscan options
 (derived from the source to about a pixel). Duck Hunt's flash boxes are big, so a pixel or two does not matter; a few tens of pixels would.
+
+## Not a goal: games whose original gun was analog, so they never flash
+
+The GunCon 2 only gives a position when the game flashes the screen for it. Alien3, Jurassic Park and Terminator 2 (your call, and it
+matches the hardware: their guns were mounted on potentiometers) never flash, so a CRT gun cannot work on them and that is accepted. I
+believe the same of Line of Fire, Operation Wolf, Rambo III and Laser Ghost, but you named only the first three: tell me if any of the others
+did flash. Their maps, timings and the app's handling are in place and harmless, but nothing here should be expected to work, so none of it is
+on the list above. (Rambo III's core also reads only the stick's X.)
 
 ## What I cannot test without you, and why
 
