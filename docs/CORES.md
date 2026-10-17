@@ -105,3 +105,15 @@ The NES window follows the core's overscan option (detected from the measured pi
 as if it were a bitstream, the FPGA is left unconfigured, the app then refuses to start, and a write to `/dev/MiSTer_cmd` blocks the console
 for good. Recovery without a reboot (a reboot would put the console back at its login prompt): run a build of the app that programs the
 FPGA from the command line when it is unconfigured (a one-off; `MiSTer /media/fat/menu.rbf`).
+
+## Cores run by the physical-disc build (PlayStation, Saturn, Mega-CD, TurboGrafx-16)
+
+`MiSTer.ini` on the card has `main=MiSTer_Physical-CD` in the `[PSX]`, `[Saturn]`, `[MegaCD]` and `[TurboGrafx16]` sections (the card's own
+physical-disc setup). When one of those cores loads, the app relaunches itself as that other executable, so **the patches in this repo do not
+apply to those cores**: no universal mapping, no flash aim, no timing log. Applying them means building the same patches onto whatever
+`MiSTer_Physical-CD` is built from (I do not know its source), or switching `main=` for a section back to `MiSTer` (which drops the disc-drive
+support for that core): your call.
+
+This is where the Saturn **Virtua Cop** (and Virtua Cop 2: `Saturn/Virtua Cop (USA) (6S).chd` etc. are on the share) lives. The Saturn core has the
+option `Pad 1 = Virt LGun`, with `LGun P1 XY Ctrl = Joy 1 / Mouse` and `LGun P1 Buttons = Joy 1 / Mouse` (`Saturn.sv`), and a lightgun module
+derived from the Mega Drive's. So it takes an absolute joystick-analog position, the same shape as the cores above, once the mapping applies.

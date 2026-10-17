@@ -1,0 +1,7 @@
+=== /media/fat/_Console/Saturn_20260713.rbf
+Saturn
+/media/fat/MiSTer_Physical-CD /media/fat/_Console/Saturn_20260713.rbf
+/media/fat#
+--- log
+/media/fat#
+
