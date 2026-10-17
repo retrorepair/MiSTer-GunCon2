@@ -5,8 +5,8 @@
 - **Point Blank (NB-1 core)**: working end to end on the user's CRT, "basically perfect" (tested 2026-10-16).
 - **Virtua Cop (Sega Model 2 core)**: everything that can be done without the game is done and checked on the real core; **not yet tried
   in the game because the ROM set on the share is incomplete** (see "Waiting on the user").
-- **Time Crisis (Namco Super System 22 core on the card)**: loads, geometry mapped; the gun's buttons are not mapped and the game
-  has not been tried. See `docs/CORES.md`.
+- **Time Crisis (Namco Super System 22 core on the card)**: loads, geometry mapped, buttons mapped from its MRA; the game has not been
+  tried. Eleven gun games on the card are mapped in all: see `docs/CORES.md` (table) and `docs/TESTING.md` (what to try first).
 - Everything is in `docs/CORES.md` (per-core facts and status), `docs/DESIGN.md` (evidence and design) and `README.md`.
 
 ## Waiting on the user
@@ -24,7 +24,7 @@ Start with `docs/TESTING.md` (per-game steps and OSD settings). Summary of the b
 ## What is on the MiSTer (192.168.1.204, UART on COM3)
 
 RAM only, a reboot returns to stock:
-- `/tmp/dbg/MiSTer17` = patched app, patches 0001..0010 (build/MiSTer_tracker_debug, md5 390bb02a...) bind-mounted over `/media/fat/MiSTer`.
+- `/tmp/dbg/MiSTer19` = patched app, patches 0001..0011 (build/MiSTer_tracker_debug, md5 a2a66ed6...) bind-mounted over `/media/fat/MiSTer`.
 - `/tmp/dbg/Model2_20261016.rbf` (md5 644e28fa...) bind-mounted over `/media/fat/_Arcade/cores/Model2.rbf`, so MRAs that name `Model2`
   get the newer core. The original `Model2.rbf` on the card is untouched underneath.
 - `/tmp/archive/*` earlier logs (Point Blank, Time Crisis probes, Model 2 probes). `/tmp/guncal_apply.log` is the live timing log.
@@ -49,6 +49,11 @@ Bring it back up after a reboot (console logged in by the user, never by this to
   `alphanu1/sega-model2-mister`. No core was modified, so nothing was copied to a private repo yet.
 
 ## Lessons for whoever continues
+
+- **`load_core` takes a core `.rbf` or an arcade `.mra` only.** A ROM path left the FPGA unconfigured and hung the console for an hour on
+  2026-10-17 (recovered without a reboot with a one-off app build; see `docs/CORES.md`). `harvest_cores.py` now refuses anything else.
+- The CD cores (PSX, Saturn, Mega-CD, TG16) run `MiSTer_Physical-CD` (MiSTer.ini `main=`): the patches do not apply there.
+- The MiSTer is currently left running Point Blank (NB-1) under the patched app.
 
 - The user wants no ambiguity and no timer-based asks: self-paced tools, exact steps.
 - Never type credentials into a login prompt; the user logs in on the console (`tools/mister/console.ps1`), then use `serial_run.py`.
