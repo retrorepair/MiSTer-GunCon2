@@ -13,15 +13,22 @@
 - Only optical-gun games are a goal; analog-gun games (Terminator 2, Alien3) never flash and are accepted as unsupported.
 - Everything is in `docs/CORES.md` (per-core facts and status), `docs/DESIGN.md` (evidence and design) and `README.md`.
 
-## The build in flight (started 2026-10-17 15:22)
+## The build state (2026-10-18)
 
-`scripts/launch_scan15_sweep.ps1` runs `scripts/scan15_sweep.ps1` detached: synthesis once, then the fitter per seed 1604..1609 one at
-a time (about 3.5 hours each; one seed usually fits). Progress: `build/scan15_sweep.txt`. A fitted seed leaves
-`build/Model2_scan15_s<seed>.rbf`; judge a fit by `build/model2_scan15/output_files/Model2.fit.summary` and `.sta.summary` (the fitter
-often segfaults on exit after succeeding). The previous converter (plain 4:5 blend, 8-line ring) is `build/Model2_scan15_v1_s1604.rbf`;
-that is what the MiSTer runs now. To try the new one: push it as `/tmp/dbg/Model2_scan15.rbf` (serial_run.py pushz, ~9 minutes), and the
-bind mount over `/media/fat/_Arcade/cores/Model2.rbf` already points at that path (a re-mount is needed after the push). The OSD then has
-`15kHz picture`, `Vertical smoothing` and `Field order`; `config/vcopa.CFG` on the card holds the saved settings (bits 64..66).
+The smoothing/pairing/field-order build does **not fit yet**; nothing is running. Three fits, all "Fitter requires N LABs ... device contains
+only 4,191": 4,194 (first), 4,203 (converter trimmed to 174 ALUTs: the fitter's own speed optimisation moves the count by about 10 LABs
+for small changes, so smaller RTL did not mean fewer LABs), 4,197 (with the 1:1 15 kHz picture retired and its interlace path tied off,
+which synthesis says frees only 76 ALMs). Packing is the same for every seed, so more seeds do not help. Logs: `build/scan15_sweep_run*.txt`,
+`build/map_trimmed_failed.rpt`, `build/fit_trimmed_failed.summary`.
+
+The converter RTL is final and bit-exact in simulation (`forks/sega-model2-mister`, branch `guncon-scan15`, `docs/scan15.md`). To make it fit
+the options, none taken without the user's say, are: (1) a CRT-only build with the framework's `MISTER_DEBUG_NOHDMI` (about 2,000 ALMs: no HDMI
+output, no scaler screenshots; needs `direct_video=1` in MiSTer.ini), (2) drop the Virtua Cop crosshair overlay (about 70-100 ALMs),
+(3) renderer speed/area dials (needs a measurement build; could slow Daytona). Virtua Cop already runs at the game's own 29 fps.
+Scripts: `scripts/launch_scan15_sweep.ps1` (-MapOnly, -Seeds N -SkipMap), `scripts/scan15_finish.ps1` (finish-or-hold watcher).
+
+What the MiSTer runs now: the previous converter (plain 4:5 blend, `build/Model2_scan15_v1_s1604.rbf`), as `/tmp/dbg/Model2_scan15.rbf`
+bind-mounted over the card's Model2.rbf. The OSD there has `15kHz picture` (Filled is set in `config/vcopa.CFG`).
 
 ## Waiting on the user
 
