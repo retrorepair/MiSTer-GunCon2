@@ -13,22 +13,23 @@
 - Only optical-gun games are a goal; analog-gun games (Terminator 2, Alien3) never flash and are accepted as unsupported.
 - Everything is in `docs/CORES.md` (per-core facts and status), `docs/DESIGN.md` (evidence and design) and `README.md`.
 
-## The build state (2026-10-18)
+## The build state (2026-10-18, evening)
 
-The smoothing/pairing/field-order build does **not fit yet**; nothing is running. Three fits, all "Fitter requires N LABs ... device contains
-only 4,191": 4,194 (first), 4,203 (converter trimmed to 174 ALUTs: the fitter's own speed optimisation moves the count by about 10 LABs
-for small changes, so smaller RTL did not mean fewer LABs), 4,197 (with the 1:1 15 kHz picture retired and its interlace path tied off,
-which synthesis says frees only 76 ALMs). Packing is the same for every seed, so more seeds do not help. Logs: `build/scan15_sweep_run*.txt`,
-`build/map_trimmed_failed.rpt`, `build/fit_trimmed_failed.summary`.
+The smoothing/pairing/field-order converter now **fits and is on the MiSTer**. It needed room: three fits of the converter alone failed on
+"Fitter requires N LABs ... only 4,191" (4,194; 4,203; 4,197 with the 1:1 15 kHz picture retired), so the framework's HDMI scaler was dropped
+(`MISTER_DEBUG_NOHDMI` in `Model2.qsf`: about 4,000 ALMs freed, no HDMI picture, no scaler screenshots; the CRT path and `vga_scaler=0` are
+untouched). Seed 1604, 36,860 of 41,910 ALMs (88%), 514/553 memory blocks, all clocks pass (tightest setup +0.43 ns on clk_sys, +0.81 ns
+clk_mem). `build/Model2_scan15_s1604.rbf`, md5 0a2d705e... (the previous converter is `Model2_scan15_v1_s1604.rbf`).
 
-The converter RTL is final and bit-exact in simulation (`forks/sega-model2-mister`, branch `guncon-scan15`, `docs/scan15.md`). To make it fit
-the options, none taken without the user's say, are: (1) a CRT-only build with the framework's `MISTER_DEBUG_NOHDMI` (about 2,000 ALMs: no HDMI
-output, no scaler screenshots; needs `direct_video=1` in MiSTer.ini), (2) drop the Virtua Cop crosshair overlay (about 70-100 ALMs),
-(3) renderer speed/area dials (needs a measurement build; could slow Daytona). Virtua Cop already runs at the game's own 29 fps.
-Scripts: `scripts/launch_scan15_sweep.ps1` (-MapOnly, -Seeds N -SkipMap), `scripts/scan15_finish.ps1` (finish-or-hold watcher).
+15 kHz is always the Filled picture now (the 1:1 picture and `15kHz lines/width/picture` are gone). OSD: `Vertical smoothing` On/Off (bit 65),
+`Field order` Normal/Swapped (bit 66). Full notes in `forks/sega-model2-mister/docs/scan15.md`; Virtua Cop already runs at the game's own 29 fps.
 
-What the MiSTer runs now: the previous converter (plain 4:5 blend, `build/Model2_scan15_v1_s1604.rbf`), as `/tmp/dbg/Model2_scan15.rbf`
-bind-mounted over the card's Model2.rbf. The OSD there has `15kHz picture` (Filled is set in `config/vcopa.CFG`).
+**On the MiSTer now (RAM only; the 2026-10-18 reboot at 15:22 had wiped the earlier setup):** `/tmp/dbg/Model2_scan15_v2.rbf` bind-mounted over
+`_Arcade/cores/Model2.rbf`, `/tmp/dbg/MiSTer21` (patched app, patches 0001-0013, `build/MiSTer_tracker_debug`, md5 1493387b...) over
+`/media/fat/MiSTer`; Virtua Cop loaded. Bring-up after a reboot (the user logs in on the console first, `tools/mister/console.ps1`, run with
+`powershell -ExecutionPolicy Bypass -File`): push both with `serial_run.py pushz` (the rbf takes about 4 minutes, the app 2: the UART is 115,200 baud),
+`mount --bind` each, `kill` the app (nothing restarts it: `/etc/inittab` starts it once), `setsid /media/fat/MiSTer > /tmp/mister21.log 2>&1 < /dev/null &`,
+then `echo "load_core <mra>" > /dev/MiSTer_cmd` under `timeout 8`.
 
 ## Waiting on the user
 
