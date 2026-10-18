@@ -10,7 +10,8 @@ param(
   [string[]]$Seeds = @('1604', '1605', '1606', '1607', '1608', '1609'),   # a comma list also works through -File
   [string]$Src  = 'C:\Users\joelw\Mister Guncon2\forks\sega-model2-mister',
   [string]$Dir  = 'C:\Users\joelw\Mister Guncon2\build\model2_scan15',
-  [switch]$SkipMap
+  [switch]$SkipMap,
+  [switch]$MapOnly      # synthesis only, then print its area estimate and stop (no fitting)
 )
 $Seeds = @($Seeds | ForEach-Object { $_ -split ',' } | ForEach-Object { [int]$_ })
 $q   = 'C:\intelFPGA_lite\17.0\quartus\bin64'
@@ -30,6 +31,16 @@ if (-not $SkipMap) {
   $mapok = Select-String -Path "$out\Model2.map.summary" -Pattern 'Successful' -Quiet
   Log "synthesis: $(if ($mapok) {'ok'} else {'FAILED'})"
   if (-not $mapok) { exit 1 }
+}
+
+if ($MapOnly) {
+  $rpt = Get-Content "$out\Model2.map.rpt" -ErrorAction SilentlyContinue
+  foreach ($k in 'Estimate of Logic utilization', 'Dedicated logic registers', 'Total block memory bits', 'Total DSP Blocks') {
+    $l = ($rpt | Select-String -SimpleMatch $k | Select-Object -First 1).Line
+    if ($l) { Log ("map: " + ($l -replace '\s+', ' ')) }
+  }
+  Log "map only: done"
+  exit 0
 }
 
 foreach ($seed in $Seeds) {
