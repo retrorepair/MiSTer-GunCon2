@@ -60,7 +60,10 @@ foreach ($seed in $Seeds) {
     Log "seed ${seed}: assembled and timed; summary follows"
     if (Test-Path "$out\Model2.sta.summary") { Get-Content "$out\Model2.sta.summary" | Select-String 'Type|Slack' | ForEach-Object { Add-Content $res $_.Line } }
     if (Test-Path "$out\Model2.rbf") { Copy-Item "$out\Model2.rbf" (Join-Path (Split-Path $Dir) "Model2_scan15_s$seed.rbf") -Force; Log "seed ${seed}: rbf saved" }
-    break
+    # a fit is not enough: stop at the first seed whose setup slack is positive on every clock, otherwise try the next
+    $neg = @(Get-Content "$out\Model2.sta.summary" -ErrorAction SilentlyContinue | ForEach-Object { if ($_ -match '^Type\s*:\s*Setup') { $inset = $true } elseif ($_ -match '^Type') { $inset = $false } elseif ($inset -and $_ -match '^Slack\s*:\s*(-[0-9.]+)') { $matches[1] } })
+    if ($neg.Count -eq 0) { Log "seed ${seed}: setup timing met on every clock"; break }
+    Log "seed ${seed}: setup timing MISSED ($($neg -join ', ') ns); trying the next seed"
   }
 }
 Log "sweep done"
