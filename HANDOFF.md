@@ -7,8 +7,9 @@
   reload exactly, and the user's verdict was "seems to work great". The core is the example build in `retrorepair/sega-model2-mister`
   (public), branch `guncon-scan15`: a 15 kHz scan converter (the filled 480-line picture, no smoothing, field order Normal, analog only
   via `MISTER_DEBUG_NOHDMI`) plus the beacon (`docs/scan15.md` and `docs/guncon2/README.md` there).
-- **Both changes were proposed to the core's author** as issues on `alphanu1/sega-model2-mister`: #13 (the white flash) and #14 (the 15 kHz
-  picture). The user decided that the fork **is only an example of the two ideas and is not released**; no Model 2 core is in this repo's
+- **Both were raised with the core's author** as issues on `alphanu1/sega-model2-mister`: #13 (Virtua Cop's I/O board makes no flash; that is
+  all it says) and #14 (the 15 kHz **field order** looks reversed on a CRT, which is the important one and costs next to no area; the filled
+  480-line picture is a nice-to-have that may not fit). The user decided that the fork **is only an example of the two ideas and is not released**; no Model 2 core is in this repo's
   release. The author is willing to make a 15 kHz-only core based on it.
 - **Release**: `retrorepair/MiSTer-GunCon2` (public) has a release with just the patched `MiSTer` and `GunCal.rbf`.
 - **Time Crisis (Namco Super System 22 core)**: parked at the user's request. Loads and is mapped; never tried.
@@ -16,6 +17,11 @@
 - Everything is in `docs/CORES.md` (per-core facts and status), `docs/DESIGN.md` (evidence and design) and `README.md`.
 
 ## Not verified, and what to do about it
+
+- **Field order.** The user judged on the CRT that the 1:1 mode's order (field 0 = even rows) looks wrong and that reversing it is "night and
+  day" better; the same is true of the converter's default. The fork's commit 2f057dc ties `swp` to 1 (local, **not pushed**: the user said the
+  fork needs no more pushes); the core on the card (seed 1604) and every `.rbf` in the fork's `releases/` have `swp` = 0, the wrong way
+  round. It needs a rebuild to see. (On 2026-10-18 the user had called "Normal" (= swp 0) perfect; the later judgement supersedes it.)
 
 - The released `MiSTer` finds the flash by an OSD line (`-,GunCon flash on request;`, any dash line containing "GunCon flash") that the
   **core** announces. Host unit tests pass, but it has **not been run on the MiSTer with a core that has the line**: the last core build

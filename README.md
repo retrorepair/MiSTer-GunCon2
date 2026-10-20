@@ -25,8 +25,8 @@ brightness), and some games' own flash is a black frame (Virtua Cop's is), so a 
 the whole picture white for a moment on a shot, when the patched `MiSTer` asks, fixes that. The core announces it with a line in its OSD
 (`GunCon flash on request`); a core without the line is never asked, so every stock core works as before, only not in dark areas.
 Sega Model 2 (Virtua Cop) is the worked example, see [below](#virtua-cop-and-the-white-flash-an-example-not-shipped); it has been proposed to
-the core's author as [alphanu1/sega-model2-mister#13](https://github.com/alphanu1/sega-model2-mister/issues/13) (the flash) and
-[#14](https://github.com/alphanu1/sega-model2-mister/issues/14) (a 15 kHz picture that fills the screen).
+the core's author as [alphanu1/sega-model2-mister#13](https://github.com/alphanu1/sega-model2-mister/issues/13) (the game's I/O board makes no flash) and
+[#14](https://github.com/alphanu1/sega-model2-mister/issues/14) (the 15 kHz field order, and a picture that fills the screen).
 
 ## Status: be honest about what has been tried
 
