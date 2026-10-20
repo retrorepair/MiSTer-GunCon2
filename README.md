@@ -4,6 +4,10 @@ Use a Namco **GunCon 2** on a **15 kHz CRT** with MiSTer cores, without calibrat
 core, and from then on every core's picture position is worked out from its measured video timing. The pointer is taken from the game's
 own flash on a trigger pull, so it does not wander between shots.
 
+**The aim is that any MiSTer core with a light-gun game works this way**, with no per-core calibration and no per-core changes: the program
+reads the game's flash on whatever core you load. Where a game's own flash is unusable (Virtua Cop's is a black frame), a core can supply a
+white one on request, see [below](#what-you-need-and-what-is-custom).
+
 **CRT only.** A light gun reads the beam of a tube; it cannot work on an LCD or on HDMI.
 
 ## What you need, and what is custom
