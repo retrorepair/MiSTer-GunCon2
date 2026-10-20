@@ -14,7 +14,7 @@ How to read the columns:
 | Game (core's own name) | Source | Picture (measured) | HSync / VSync | Picture edges, gun raw | Buttons (see below) | Tested |
 |---|---|---|---|---|---|---|
 | Point Blank (NB1) | `kyledlester/Namco_NB1_MiSTer` | 288x224 progressive | 32 px / 3 lines | x 148..712, y 30..250 | trigger 4, A Start, B Coin, Select Service | **on hardware, "basically perfect"** |
-| Virtua Cop (Model2) | `alphanu1/sega-model2-mister` | 496x384 **interlaced**, 15.7 kHz | 64 px / 3 | x 127..759, y 36..246 (a gun window: the core's 5% off-screen band is put outside the picture) | trigger, A Reload, B Start, gun Start Coin | map and timing yes; shooting needs the full ROM set |
+| Virtua Cop (Model2) | `alphanu1/sega-model2-mister`, custom build in `retrorepair/sega-model2-mister` (branch `guncon-scan15`) | 496x480 **interlaced** (a scan converter), 15.1 kHz | 64 px / 3 | x 166..759, y 18..254; the core's 5% off-screen strip is an inset (an aim in it is moved to its edge) | trigger, A Reload, B Start, gun Start Coin | **works on the real gun** with the custom core (the beacon); the stock core works too, not in dark areas |
 | Time Crisis (SUPER22) | binary only | 640x480 **interlaced** | **unknown**, 4.7 us / 3 assumed | x 131..724, y 20..256 | trigger, A Pedal, B Start, gun Start Coin | not yet |
 | Lethal Enforcers II (KonamiGX) | `ppriest/Arcade-KonamiGX_MiSTer` | 288x224 | 32 px / 8 (estimate) | x 163..731, y 26..246 | trigger, A Reload, B Start, gun Start Coin | not yet |
 | Alien3 / Jurassic Park (S32) | `meathax/s32` | 320x224 | 32 px / 3 | x 124..713, y 31..251 | trigger, A (Alien3: second button), B Start, gun Start Coin | not yet |
@@ -54,12 +54,22 @@ The core takes a gun as `joystick_l_analog_N` (an absolute position, -127..+127 
 trigger as joystick button 4. Player 1's buttons are joystick bits 4..9 (Trigger, Reload, Start, Coin, Test, Service); the map is trigger -> Trigger, A -> Reload, B -> Start, gun Start -> Coin, Select -> Service. Reload is by
 shooting off-screen (the outer 5% of the range), or the Reload button. Set the core's OSD `Crosshair` to `Off` with a real gun.
 
-The aim is taken from the game's flash, as for Point Blank. Virtua Cop flashes in gameplay (not in the attract demo), so the flash
-can only be seen and measured by inserting a coin and starting a game. I first guessed the game does not flash and wrote a per-core
-"live" mode; the owner corrected that and the mode was withdrawn before it ran anywhere. Not yet shown on hardware.
+**How the gun works here (measured on a real CRT with a GunCon 2, 2026-10-17..20).** Virtua Cop's own flash after a shot is a black frame:
+51 of 52 shots saw the gun's spot go dark during it, and the first lit report after it carries a junk Y of 5. A CRT gun cannot see anything
+under about a third of full brightness, so a dark enemy gives it nothing to measure; with the aim taken from the game's flash or from the
+light alone, dark enemies were not hit and an off-screen shot could not be told from a dark one (the reload lottery). The fix is the beacon:
+the custom core shows the whole picture white for a few fields while the app asks (`joystick_3` bit 0), the app holds the trigger back
+about 55 ms, measures, and gives the core the aim, or off-screen if the gun saw nothing, and then the trigger. The core announces it with the
+OSD line `GunCon flash on request`; a core without it is never asked. Everything about it, with the traces' numbers, is in
+`retrorepair/sega-model2-mister`: `docs/scan15.md` and `docs/guncon2/README.md`.
 
-Measured on the card with Daytona (`Daytona USA (Revision A) [15kHz CRT]`, the same video generator as Virtua Cop's): 496x384
-interlaced, `htime` 6355, `ptime` 4806, `de_h` 698 clocks (6.98 us), `de_v` 42 lines, derived HSync 6.2 us (= 64 pixels,
+The core's own off-screen strip (its I/O board flags a gun within 5% of its range of either end) is handled with an inset: stick values
+13..242 of 0..255 stay on the screen, an aim in the strip is moved to the strip's edge, everything else is exact, and only a real off-screen
+shot goes into the strip. An earlier version squeezed the whole picture into the rest of the stick range, which put the game's aim up to 5%
+off toward the edges.
+
+Measured on the card with Daytona in the original 1:1 15 kHz mode (the custom core now always shows the 480-line filled picture: 496x480
+interlaced, raw x 166..759, y 18..254): 496x384 interlaced, `htime` 6355, `ptime` 4806, `de_h` 698 clocks (6.98 us), `de_v` 42 lines, derived HSync 6.2 us (= 64 pixels,
 `m2_video_timing.sv`). The universal mapping puts the picture at raw x 159..729, y 47..235, comfortably inside the driver's
 8-bit Y. The core's own button list is `Coin, Start, Test, Service, VR1 Red, VR4 Green, Accel, Brake, Gear Up, Gear Down,
 VR2 Blue, VR3 Yellow`; the Virtua Cop MRA renames bits 4..9 to `Trigger, Reload, Start, Coin, Test, Service`.
