@@ -1,4 +1,4 @@
-From 88a6b405c797711f07dd8ea6d307e65d61bc85cb Mon Sep 17 00:00:00 2001
+From f3ec31b060c1e217154a113be48b654bc054dbc3 Mon Sep 17 00:00:00 2001
 From: retrorepair <joelwhybrow@googlemail.com>
 Date: Sun, 18 Oct 2026 23:52:42 +0100
 Subject: [PATCH 17/17] input: the light-gun beacon - hold the trigger, ask the core
@@ -16,11 +16,11 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
 ---
  cfg.cpp                    |   2 +
  cfg.h                      |   1 +
- input.cpp                  |  61 ++++++++++++++++++++--
+ input.cpp                  |  75 +++++++++++++++++++++++++--
  lightgun_crt.cpp           |  97 +++++++++++++++++++++++++++++++++++
  lightgun_crt.h             |  33 ++++++++++++
  test/lightgun_crt_test.cpp | 102 ++++++++++++++++++++++++++++++++++++-
- 6 files changed, 291 insertions(+), 5 deletions(-)
+ 6 files changed, 305 insertions(+), 5 deletions(-)
 
 diff --git a/cfg.cpp b/cfg.cpp
 index 630ee37..93e0770 100644
@@ -55,7 +55,7 @@ index 5823b3a..0065943 100644
  	uint8_t wheel_force;
  	uint16_t wheel_range;
 diff --git a/input.cpp b/input.cpp
-index 5b69359..ba7f510 100644
+index 5b69359..e4c5ae7 100644
 --- a/input.cpp
 +++ b/input.cpp
 @@ -2090,9 +2090,9 @@ static void gundbg_log_out(int dev, const crtgun_state *st, uint32_t t_ms)
@@ -70,25 +70,39 @@ index 5b69359..ba7f510 100644
  	if (now != last_flush)
  	{
  		fflush(f);
-@@ -2284,6 +2284,17 @@ static void guncal_apply_universal(int i)
+@@ -2284,6 +2284,31 @@ static void guncal_apply_universal(int i)
  	}
  }
  
-+// Cores that can show the whole picture white when asked (a bit of the joystick_3 word), which is what the beacon in lightgun_crt.h needs. The
-+// app must not ask a core that cannot do it: it would then hear "no light" and call every shot a reload. LIGHTGUN_CRT_BEACON=0 turns it off.
++// A core announces that it can show the whole picture white when asked (a bit of the joystick_3 word), which is what the beacon in
++// lightgun_crt.h needs, with a text line in its OSD menu, a dash entry containing "GunCon flash" ("-,GunCon flash on request;" in its config
++// string). The app must not ask a core that cannot do it: it would then hear "no light" and call every shot a reload. LIGHTGUN_CRT_BEACON=0
++// turns the asking off. Looked up once per core.
 +static bool crtgun_beacon_core(void)
 +{
-+	static const char *const cores[] = { "Model2" };
++	static char cached[64] = "";
++	static bool answer = false;
++
 +	if (!cfg.lightgun_crt_beacon) return false;
 +	const char *c = user_io_get_core_name(1);
-+	for (unsigned k = 0; k < sizeof(cores) / sizeof(*cores); k++) if (!strcasecmp(c, cores[k])) return true;
-+	return false;
++	if (!user_io_get_confstr(0)) return false;                  // the core's config string is not in yet: do not decide
++	if (strcmp(c, cached))
++	{
++		snprintf(cached, sizeof(cached), "%s", c);
++		answer = false;
++		for (int n = 1; n < 256; n++)
++		{
++			const char *f = user_io_get_confstr(n);             // NULL for an empty field as well as past the end
++			if (f && f[0] == '-' && strstr(f, "GunCon flash")) { answer = true; break; }
++		}
++	}
++	return answer;
 +}
 +
  static void crtgun_get_params(int i, crtgun_params *p)
  {
  	guncal_apply_universal(i);
-@@ -2297,6 +2308,8 @@ static void crtgun_get_params(int i, crtgun_params *p)
+@@ -2297,6 +2322,8 @@ static void crtgun_get_params(int i, crtgun_params *p)
  	p->dark_ms = cfg.lightgun_crt_dark_ms;
  	p->edge_pct = cfg.lightgun_crt_edge_pct;
  	p->mode = cfg.lightgun_crt_mode;
@@ -97,7 +111,7 @@ index 5b69359..ba7f510 100644
  }
  
  // Mode 1 (aim from the game's flash): the core is given the held aim, not the gun's raw axes. Send it whenever it changes.
-@@ -2305,6 +2318,7 @@ static bool    crtgun_sent_ok[NUMDEV];
+@@ -2305,6 +2332,7 @@ static bool    crtgun_sent_ok[NUMDEV];
  
  static void crtgun_deliver(int i, const crtgun_params *p)
  {
@@ -105,7 +119,7 @@ index 5b69359..ba7f510 100644
  	// The core scales the gun over guncal[] (the picture, or the core's own window on it). An aim stays inside the part of that
  	// range the core still counts as on the screen; offscreen is one unit outside it, which clamps to the edge.
  	const int32_t *g = input[i].guncal;
-@@ -2344,6 +2358,42 @@ static void crtgun_deliver(int i, const crtgun_params *p)
+@@ -2344,6 +2372,42 @@ static void crtgun_deliver(int i, const crtgun_params *p)
  	crtgun_sent_ok[i] = true;
  }
  
@@ -148,7 +162,7 @@ index 5b69359..ba7f510 100644
  // The tracker's decisions depend on TIME (a dark gap that outlasts dark_ms, a flash window that closes), but the kernel delivers a report
  // only when a value changed, so a gun that goes dark and stays still sends nothing for seconds and the decision was only taken, and the
  // core only told, at the next event: the aim stayed where it last was for a few seconds, and the off-screen state arrived late (or not
-@@ -2365,7 +2415,9 @@ static void crtgun_tick(void)
+@@ -2365,7 +2429,9 @@ static void crtgun_tick(void)
  		crtgun_params p;
  		crtgun_get_params(i, &p);
  		crtgun_update(&crtgun[i], &p, now);
@@ -158,7 +172,7 @@ index 5b69359..ba7f510 100644
  	}
  }
  
-@@ -2384,6 +2436,7 @@ static void crtgun_feed(int i, const struct input_event *ev)
+@@ -2384,6 +2450,7 @@ static void crtgun_feed(int i, const struct input_event *ev)
  	else if (ev->type == EV_KEY && ev->code == GUNCON2_TRIGGER_CODE)
  	{
  		crtgun_set_trigger(&crtgun[i], ev->value != 0, now, &p);
@@ -166,7 +180,7 @@ index 5b69359..ba7f510 100644
  		crtgun_update(&crtgun[i], &p, now);
  	}
  	else if (ev->type == EV_SYN)
-@@ -2395,7 +2448,9 @@ static void crtgun_feed(int i, const struct input_event *ev)
+@@ -2395,7 +2462,9 @@ static void crtgun_feed(int i, const struct input_event *ev)
  		return;
  	}
  
@@ -176,7 +190,7 @@ index 5b69359..ba7f510 100644
  
  #ifdef GUNDBG
  	gundbg_log_out(i, &crtgun[i], now);
-@@ -6636,7 +6691,7 @@ int input_test(int getchar)
+@@ -6636,7 +6705,7 @@ int input_test(int getchar)
  									dev = i;
  								}
  

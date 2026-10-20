@@ -39,7 +39,7 @@ then `echo "load_core <mra>" > /dev/MiSTer_cmd` under `timeout 8`.
    not tried), and the left/top dead-zone asymmetry if it is still there.
 3. **Kernel Y fix** (optional): `patches/kernel/` is a one-line driver patch. It needs a kernel rebuild and a new kernel image on the SD card.
 
-## What is on the MiSTer (192.168.1.204, UART on COM3)
+## What is on the MiSTer (UART on COM3)
 
 RAM only, a reboot returns to stock:
 - `/tmp/dbg/MiSTer21` = patched app, patches 0001..0013, bind-mounted over `/media/fat/MiSTer`.

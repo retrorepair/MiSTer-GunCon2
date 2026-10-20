@@ -10,3 +10,4 @@ captures/*.csv
 # private copies of third-party cores (each is its own git repo, pushed to its own private repo)
 /forks/
 /captures/ts/
+captures/gun/
