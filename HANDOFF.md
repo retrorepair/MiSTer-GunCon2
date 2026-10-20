@@ -23,7 +23,7 @@
   `swp` = 0 hard-wired: field 0 (aligned vsync, 263 lines) = even output rows, field 1 (vsync half a line early, 262 lines) = odd rows. The user says
   the release's 1:1 mode looks reversed against it; its row parity reads the same in the code, so the cause is unproven (maybe which native
   frame goes in which field). Issue #14 on `alphanu1/sega-model2-mister` reports exactly this. Do NOT flip `swp` (a flip was tried in the source
-  for an hour on 2026-10-20 and reverted).
+  on 2026-10-20 and reverted before any build).
 - The released `MiSTer` finds the flash by an OSD line (`-,GunCon flash on request;`, any dash line containing "GunCon flash") that the
   **core** announces. Host unit tests pass, but it has **not been run on the MiSTer with a core that has the line**: the last core build
   (the one with the line) was stopped on purpose. The Model 2 `.rbf` files in the fork's `releases/` predate the line, so with the released
