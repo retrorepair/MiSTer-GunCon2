@@ -10,23 +10,26 @@ own flash on a trigger pull, so it does not wander between shots.
 
 | Piece | Stock or custom | Needed for |
 |---|---|---|
-| Cores for the games you play (NES, SNES, Mega Drive, Namco NB-1, System 32, ...) | **stock, unmodified** | everything except the Virtua Cop row below |
+| Cores for the games you play (NES, SNES, Mega Drive, Namco NB-1, System 32, ...) | **stock, unmodified** | everything |
 | `MiSTer` (the main program) | **patched**, built from `MiSTer-devel/Main_MiSTer` | everything: this is where the gun handling lives |
 | `GunCal.rbf` (calibration core) | **custom**, tiny, our own | calibrating, once. It is not a game core. |
-| `Model2_GunCon.rbf` (Sega Model 2 core) | **custom build** of `alphanu1/sega-model2-mister` | Virtua Cop only (see below) |
 
-So: only **Virtua Cop** needs a custom game core. For everything else the game cores stay stock; you replace the main program and run the
-calibration core once.
+**Nothing else is custom: no game core is replaced.** Both files are in the [release](https://github.com/retrorepair/MiSTer-GunCon2/releases/latest).
 
-Why Virtua Cop is different: its own "flash" after a shot is a black frame, and a CRT gun cannot see anything dark (it needs about a third of
-full brightness), so a dark enemy gives it nothing to measure. The custom Model 2 core can show the whole picture white for a moment on a
-shot, which the patched `MiSTer` asks for (the arcade cabinet's gun board did the same in the video path). The core announces that it can
-with a line in its OSD ("GunCon flash on request"); a core without the line is never asked, so the stock Model 2 core still works with the
-patched `MiSTer`, just not in dark areas.
+One thing a core *can* add, and none ships it yet: the **white flash**. A CRT gun cannot see anything dark (it needs about a third of full
+brightness), and some games' own flash is a black frame (Virtua Cop's is), so a dark enemy gives it nothing to measure. A core that can show
+the whole picture white for a moment on a shot, when the patched `MiSTer` asks, fixes that. The core announces it with a line in its OSD
+(`GunCon flash on request`); a core without the line is never asked, so every stock core works as before, only not in dark areas.
+Sega Model 2 (Virtua Cop) is the worked example, see [below](#virtua-cop-and-the-white-flash-an-example-not-shipped); it has been proposed to
+the core's author as [alphanu1/sega-model2-mister#13](https://github.com/alphanu1/sega-model2-mister/issues/13) (the flash) and
+[#14](https://github.com/alphanu1/sega-model2-mister/issues/14) (a 15 kHz picture that fills the screen).
 
 ## Status: be honest about what has been tried
 
-- Tested on a real CRT with a real GunCon 2: **Point Blank (Namco NB-1 core)** and **Virtua Cop (custom Model 2 core)**.
+- Tested on a real CRT with a real GunCon 2: **Point Blank (Namco NB-1 core, stock)** and **Virtua Cop (the example Model 2 core with the white
+  flash)**. Virtua Cop was played with an earlier build of this program that knew the Model 2 core by name. The program in this release finds
+  the flash by the core's OSD line instead; it passes the host tests, but **it has not been run on the MiSTer with a core that has the line**,
+  because no such core has been built yet. Cores without the line behave exactly as before.
 - Every other core's mapping is derived from its measured video and its source, and **has not been tried with the gun**. See
   [docs/CORES.md](docs/CORES.md) for what is known per core and [docs/TESTING.md](docs/TESTING.md) for what to try first.
 - Games whose original gun was analog (Terminator 2, Jurassic Park, Alien3) never flash, so a CRT gun cannot work on them.
@@ -45,19 +48,22 @@ patched `MiSTer`, just not in dark areas.
 5. **Play.** Load any core and game. The first time, map the gun's buttons as you would a gamepad (OSD, Define joystick buttons): the trigger
    is the game's first button, for example. [docs/CORES.md](docs/CORES.md) lists a layout per core.
 
-## Virtua Cop (custom Model 2 core)
+## Virtua Cop and the white flash (an example, not shipped)
 
-1. Copy `Model2_GunCon.rbf` to `/media/fat/_Arcade/cores/Model2.rbf` (keep the original as `Model2.rbf.bak`), and
-   `Virtua Cop (Revision A) [15kHz CRT].mra` to `/media/fat/_Arcade/`.
-2. ROMs go in `/media/fat/games/mame/`, which you supply: `vcopa.zip`, `vcop.zip` and `model1io2.zip` (MAME's sets).
-3. Load the MRA. In the core's OSD set **Crosshair = Off** (or leave it on to see where the game thinks you are aiming), and map the gun:
-   trigger = Trigger, A = Reload, B = Start, gun Start = Coin.
-4. Insert a coin, press Start. **Each shot flashes the whole picture white for a moment; that is the gun finding its aim**, and the trigger
-   reaches the game about 55 ms after you pull it. Shooting off the screen reloads, exactly, because no light during the flash means the gun
-   is not pointing at the picture.
-5. The custom core is analog only (no HDMI picture, `vga_scaler=0`) and always shows 15 kHz as the 480-line filled picture it was built for;
-   24 kHz is unchanged. Details and the design: `forks/sega-model2-mister` and its `docs/scan15.md`.
-6. To turn the flash off: `LIGHTGUN_CRT_BEACON=0` in the `[Model2]` section of `MiSTer.ini` (the gun then follows the light only).
+The Sega Model 2 core was changed to show the white flash, and to give a 15 kHz picture that fills the screen (a scan converter), as a
+worked example for core authors. The source is the `guncon-scan15` branch of
+[retrorepair/sega-model2-mister](https://github.com/retrorepair/sega-model2-mister) (a copy of `alphanu1/sega-model2-mister`). **No Model 2 core
+is part of this release**; the changes are proposed to the author in the two issues above. What it does, with the evidence:
+
+- Each shot is held back about 55 ms while the picture flashes white; the gun measures the white and the aim goes to the game with the trigger.
+  Shooting off the screen reloads exactly, because no light during a white picture means the gun is not pointing at it.
+- The contract, for any core: `joystick_3` bit 0 is a level from `MiSTer`; while it is high, show the whole picture white in whole fields, six at
+  most; announce it with an OSD line containing `GunCon flash`. The details are in
+  [docs/guncon2/README.md](https://github.com/retrorepair/sega-model2-mister/blob/guncon-scan15/docs/guncon2/README.md) and
+  [docs/scan15.md](https://github.com/retrorepair/sega-model2-mister/blob/guncon-scan15/docs/scan15.md) there.
+- To try it you build the core from that branch (Quartus Lite 17.0, the chip is 99% full, and a fit can need several fitter seeds; the CRT build
+  has no HDMI). The `.rbf` files in that repository's `releases/` predate the OSD line, so this release's `MiSTer` will not ask them for the flash.
+- `LIGHTGUN_CRT_BEACON=0` in `MiSTer.ini` (for example in a `[Model2]` section) stops the program from ever asking.
 
 ## How it works
 
@@ -69,7 +75,7 @@ patched `MiSTer`, just not in dark areas.
 3. **Aim from the game's flash** (`LIGHTGUN_CRT_MODE=1`, the default). On a pull the pointer is set from the first valid readings that follow,
    which is the game's flash, and it holds until the next pull. A shot with no light and no flash stays offscreen, so reload shots work.
 4. **Beacon** (cores that announce it): the app holds the trigger back on a pull, asks the core for a white picture, measures, then gives the
-   core the aim and the trigger together. [docs/DESIGN.md](docs/DESIGN.md) and the notes in `forks/sega-model2-mister/docs/guncon2/` have the
+   core the aim and the trigger together. [docs/DESIGN.md](docs/DESIGN.md) and the notes in the Model 2 repository's `docs/guncon2/` have the
    evidence and the contract for core authors.
 
 ## `MiSTer.ini` keys (all optional)
@@ -97,6 +103,8 @@ Settings can go in a section named for a core or an MRA set (for example `[Model
 - `scripts/` `build-main-mister.sh` (ARM build in WSL, runs the host unit tests, reproducible), `build-guncal.sh`, and the Quartus helpers.
 - `tools/mister/` helpers for the MiSTer's UART console and the analysis of gun traces (`GUNDBG=1` builds record every raw report).
 - `docs/` the calibration core, the design and its evidence, per-core notes, what to test. `HANDOFF.md` is the working log.
+- The [release](https://github.com/retrorepair/MiSTer-GunCon2/releases/latest) has just the two files you need: `MiSTer` (built by
+  `scripts/build-main-mister.sh` from the patches here) and `GunCal.rbf`.
 
 ## Build it yourself
 

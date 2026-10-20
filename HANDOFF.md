@@ -1,81 +1,71 @@
 # Handoff
 
-## Where things stand (2026-10-17, afternoon)
+## Where things stand (2026-10-20)
 
-- **Point Blank (NB-1 core)**: working end to end on the user's CRT, "basically perfect" (tested 2026-10-16).
-- **Virtua Cop (Sega Model 2 core, alphanu1's, ROM set complete)**: the gun works, off-screen reload works. Dead zones at the edges were
-  the core's symmetric off-screen band (patch 0013 moves it outside the picture). The user's remaining complaint is the 15 kHz
-  picture (borders, interlace flicker, small text), which is a video problem, not a gun one. Work on it lives in the private fork
-  `retrorepair/sega-model2-mister`, branch `guncon-scan15` (see `docs/scan15.md` there): an in-core scan converter that turns the
-  native 24 kHz picture into 480 interlaced 15.1 kHz lines, a 4:5 vertical scale, now with a vertical flicker filter, a 12-line ring,
-  an automatic pairing of the two fields of a frame to the game's image changes, and a field-order switch. Bit-exact in simulation.
-- **Time Crisis (Namco Super System 22 core)**: parked at the user's request ("forget time crisis for now"). Loads and is mapped; never tried.
-- Only optical-gun games are a goal; analog-gun games (Terminator 2, Alien3) never flash and are accepted as unsupported.
+- **Point Blank (Namco NB-1 core, stock)**: works end to end on the user's CRT, "basically perfect" (2026-10-16).
+- **Virtua Cop (Sega Model 2 core)**: works on the real gun with the white-flash ("beacon") build: dark enemies are hit, off-screen shots
+  reload exactly, and the user's verdict was "seems to work great". The core is the example build in `retrorepair/sega-model2-mister`
+  (public), branch `guncon-scan15`: a 15 kHz scan converter (the filled 480-line picture, no smoothing, field order Normal, analog only
+  via `MISTER_DEBUG_NOHDMI`) plus the beacon (`docs/scan15.md` and `docs/guncon2/README.md` there).
+- **Both changes were proposed to the core's author** as issues on `alphanu1/sega-model2-mister`: #13 (the white flash) and #14 (the 15 kHz
+  picture). The user decided that the fork **is only an example of the two ideas and is not released**; no Model 2 core is in this repo's
+  release. The author is willing to make a 15 kHz-only core based on it.
+- **Release**: `retrorepair/MiSTer-GunCon2` (public) has a release with just the patched `MiSTer` and `GunCal.rbf`.
+- **Time Crisis (Namco Super System 22 core)**: parked at the user's request. Loads and is mapped; never tried.
+- Only optical-gun games are a goal; analog-gun games (Terminator 2, Alien3, Jurassic Park) never flash and are unsupported.
 - Everything is in `docs/CORES.md` (per-core facts and status), `docs/DESIGN.md` (evidence and design) and `README.md`.
 
-## The build state (2026-10-18, evening)
+## Not verified, and what to do about it
 
-The smoothing/pairing/field-order converter now **fits and is on the MiSTer**. It needed room: three fits of the converter alone failed on
-"Fitter requires N LABs ... only 4,191" (4,194; 4,203; 4,197 with the 1:1 15 kHz picture retired), so the framework's HDMI scaler was dropped
-(`MISTER_DEBUG_NOHDMI` in `Model2.qsf`: about 4,000 ALMs freed, no HDMI picture, no scaler screenshots; the CRT path and `vga_scaler=0` are
-untouched). Seed 1604, 36,860 of 41,910 ALMs (88%), 514/553 memory blocks, all clocks pass (tightest setup +0.43 ns on clk_sys, +0.81 ns
-clk_mem). `build/Model2_scan15_s1604.rbf`, md5 0a2d705e... (the previous converter is `Model2_scan15_v1_s1604.rbf`).
+- The released `MiSTer` finds the flash by an OSD line (`-,GunCon flash on request;`, any dash line containing "GunCon flash") that the
+  **core** announces. Host unit tests pass, but it has **not been run on the MiSTer with a core that has the line**: the last core build
+  (the one with the line) was stopped on purpose. The Model 2 `.rbf` files in the fork's `releases/` predate the line, so with the released
+  `MiSTer` they get no flash. What was played on the hardware is the previous app (it knew the core by name) with
+  `Model2_scan15_s1604.rbf` (md5 9b2584ec..., misses the i960 clock by 1.688 ns, works).
+- To close it: build the fork with `scripts/scan15_sweep.ps1` (it continues over seeds until setup timing is met on every clock; about
+  27 min a fit, one at a time, a fit peaks near 5 GB; seeds 1606, 1607, ...), put the result on the card as `Model2.rbf`, run the released
+  `MiSTer`, and check that a shot flashes white and that a core without the line (Point Blank) does not.
 
-15 kHz is always the Filled picture now (the 1:1 picture and `15kHz lines/width/picture` are gone). OSD: `Vertical smoothing` On/Off (bit 65),
-`Field order` Normal/Swapped (bit 66). Full notes in `forks/sega-model2-mister/docs/scan15.md`; Virtua Cop already runs at the game's own 29 fps.
+## What is on the MiSTer (192.168.1.204, UART on COM3; the user logs in on the console)
 
-**On the MiSTer now (RAM only; the 2026-10-18 reboot at 15:22 had wiped the earlier setup):** `/tmp/dbg/Model2_scan15_v2.rbf` bind-mounted over
-`_Arcade/cores/Model2.rbf`, `/tmp/dbg/MiSTer21` (patched app, patches 0001-0013, `build/MiSTer_tracker_debug`, md5 1493387b...) over
-`/media/fat/MiSTer`; Virtua Cop loaded. Bring-up after a reboot (the user logs in on the console first, `tools/mister/console.ps1`, run with
-`powershell -ExecutionPolicy Bypass -File`): push both with `serial_run.py pushz` (the rbf takes about 4 minutes, the app 2: the UART is 115,200 baud),
-`mount --bind` each, `kill` the app (nothing restarts it: `/etc/inittab` starts it once), `setsid /media/fat/MiSTer > /tmp/mister21.log 2>&1 < /dev/null &`,
-then `echo "load_core <mra>" > /dev/MiSTer_cmd` under `timeout 8`.
+On the SD card: `_Arcade/cores/Model2.rbf` = the beacon build (seed 1604, md5 9b2584ec...), `Model2.rbf.bak` = the original; the user's
+calibration `config/GUNCAL_uni_0b9a_016a_v1.cfg`; `config/inputs/*_input_0b9a_016a_v3.map` (the gun's buttons, one per gun game, made by
+`tools/mister/make_gun_map.py`, which refuses to overwrite); `config/vcopa.CFG`; `_Arcade/_gun_test/` (two MRAs; `load_core` only takes
+MRAs under `/media/fat`). `MiSTer.ini` is the original. The stock `/media/fat/MiSTer` is untouched.
 
-## Waiting on the user
+RAM only (a reboot returns to stock): `/tmp/dbg/MiSTer25` (the previous patched app) bind-mounted over `/media/fat/MiSTer`. Bring up after a
+reboot: push the app with `tools/mister/serial_run.py pushz` (UART 115,200 baud, about 11 KB/s), `mount --bind`, `kill` the running app
+(nothing restarts it: `/etc/inittab` starts it once), `setsid /media/fat/MiSTer > /tmp/mister.log 2>&1 < /dev/null &`, then
+`echo "load_core <mra>" > /dev/MiSTer_cmd` under `timeout 8`.
 
-1. Look at the new build on the CRT when it exists (see above): is the flicker gone with `Vertical smoothing` On; if the picture still
-   looks doubled or its line pairs look swapped, `Field order` = Swapped.
-2. Report aiming accuracy in Filled mode (the gun mapping is measured from the video, so it should follow the new picture, but it was
-   not tried), and the left/top dead-zone asymmetry if it is still there.
-3. **Kernel Y fix** (optional): `patches/kernel/` is a one-line driver patch. It needs a kernel rebuild and a new kernel image on the SD card.
+## Build
 
-## What is on the MiSTer (UART on COM3)
+- App: `MSYS_NO_PATHCONV=1 wsl -d Ubuntu -u root -- bash "/mnt/c/Users/joelw/Mister Guncon2/scripts/build-main-mister.sh"` (runs the host
+  tests; writes `build/MiSTer_tracker` and `build/MiSTer_tracker_debug`, the latter records every raw report with `GUNDBG=1`).
+  The development clone `Main_MiSTer/` is git-ignored; its commits are exported with `git format-patch` into `patches/` (rename to
+  `00NN-...` and fix the `[PATCH n/17]` subject).
+- GunCal: `scripts/build-guncal.sh` -> `build/GunCal.rbf`.
+- The Model 2 core: `scripts/scan15_sweep.ps1` (see above). `forks/sega-model2-mister` has remote `mine` (retrorepair, public) and `origin`
+  (alphanu1, read only).
 
-RAM only, a reboot returns to stock:
-- `/tmp/dbg/MiSTer21` = patched app, patches 0001..0013, bind-mounted over `/media/fat/MiSTer`.
-- `/tmp/dbg/Model2_scan15.rbf` (the v1 converter) bind-mounted over `/media/fat/_Arcade/cores/Model2.rbf`, so MRAs that name `Model2` get
-  it. The original `Model2.rbf` on the card is untouched underneath.
-- `/tmp/archive/*` earlier logs (Point Blank, Time Crisis probes, Model 2 probes). `/tmp/guncal_apply.log` is the live timing log.
+## Waiting on the user / open
 
-Written to the SD card (the only persistent changes; the stock `MiSTer` binary is untouched):
-- `config/GUNCAL_uni_0b9a_016a_v1.cfg` (+ `.3pt.bak`, `GUNCAL_log.txt`): the user's universal calibration.
-- `config/inputs/<game>_input_0b9a_016a_v3.map` (one per gun game found on the card: vcopa, vcop, Model2, le2, alien3, jpark, loffire,
-  ptblank2a, term2, rambo3, lghost, opwolf, timecris, plus ptblanka/NB1/NES): the GunCon 2's buttons onto the game's own button list.
-  Layout and rationale in `docs/CORES.md`. Written by `tools/mister/make_gun_map.py`, which refuses to overwrite.
-- `config/vcopa.CFG`: OSD settings for Virtua Cop (Crosshair Off, 262/263 lines, Filled).
-- `_Arcade/_gun_test/` with two MRAs from the Model 2 release. Delete the folder to undo. (`load_core` only takes MRAs under `/media/fat`.)
-
-Bring it back up after a reboot (console logged in by the user, never by this tooling): see the commands in README.md, then
-`mount --bind /tmp/dbg/Model2_scan15.rbf /media/fat/_Arcade/cores/Model2.rbf` (push the rbf with `serial_run.py pushz`, ~9 minutes).
-
-## Repos
-
-- This repo: `retrorepair/MiSTer-GunCon2` (private). (`MiSTer-GunCal` is an older duplicate, unused.)
-- `retrorepair/sega-model2-mister` (private working copy of `alphanu1/sega-model2-mister`, GPL-3.0), branch `guncon-scan15`: the 15 kHz
-  scan converter. Local clone in `forks/` (git-ignored; its `mine` remote is the private copy, `origin` is alphanu1's public repo, read
-  only). `forks/Arcade_namco22_MiSTer` is a read-only clone of `spacestate1`'s Namco System 22 core.
-- Never push to a public fork; the user wants private copies.
+1. Decide whether to build a core with the OSD line (above), so the released app and a core agree on the hardware.
+2. An HDMI-on fit of the converter (remove `MISTER_DEBUG_NOHDMI`) was never tried since the smoothing was dropped.
+3. **Kernel Y fix** (optional): `patches/kernel/` is a one-line driver patch (the driver keeps only the low byte of Y; the app compensates).
+4. Cores other than Point Blank and Virtua Cop are mapped from their measured video and have not been tried with the gun.
 
 ## Lessons for whoever continues
 
-- **`load_core` takes a core `.rbf` or an arcade `.mra` only.** A ROM path left the FPGA unconfigured and hung the console for an hour on
-  2026-10-17 (recovered without a reboot with a one-off app build; see `docs/CORES.md`). `harvest_cores.py` now refuses anything else.
+- **`load_core` takes a core `.rbf` or an arcade `.mra` only.** A ROM path left the FPGA unconfigured and hung the console for an hour
+  (2026-10-17). `harvest_cores.py` refuses anything else.
 - The CD cores (PSX, Saturn, Mega-CD, TG16) run `MiSTer_Physical-CD` (MiSTer.ini `main=`): the patches do not apply there.
-- The MiSTer is currently left running Virtua Cop (Filled mode) under the patched app.
-
-- The user wants no ambiguity and no timer-based asks: self-paced tools, exact steps.
+- The user wants no ambiguity and no timer-based asks: self-paced tools, exact steps. Their word is final: do not build or release what they
+  did not ask for.
 - Never type credentials into a login prompt; the user logs in on the console (`tools/mister/console.ps1`), then use `serial_run.py`.
-- **Never `cat` a big file over the serial console** (a 2.5 MB MRA jammed it); `head -c` it or `pull` it. Ctrl+C drains it.
+- **Never `cat` a big file over the serial console**; `head -c` it or `pull` it. Ctrl+C drains it.
 - Verify with a trace before designing, and never decide a game's behaviour from attract mode or a core's source: see the flash
-  correction (`docs/CORES.md`, Model 2).
+  correction (`docs/CORES.md`, Model 2). A CRT gun sees nothing below about a third of full brightness.
+- Games flash only in gameplay; default every core to flash mode (`LIGHTGUN_CRT_MODE=1`).
 - `user_io_get_confstr(n)` returns NULL for an empty field as well as past the end.
+- Fits near 99% area are chaotic (about +-10 LABs for small changes) and seeds change timing, not the LAB count.
