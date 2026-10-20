@@ -18,11 +18,12 @@
 
 ## Not verified, and what to do about it
 
-- **Field order.** The user judged on the CRT that the 1:1 mode's order (field 0 = even rows) looks wrong and that reversing it is "night and
-  day" better; the same is true of the converter's default. The fork's commit 2f057dc ties `swp` to 1 (local, **not pushed**: the user said the
-  fork needs no more pushes); the core on the card (seed 1604) and every `.rbf` in the fork's `releases/` have `swp` = 0, the wrong way
-  round. It needs a rebuild to see. (On 2026-10-18 the user had called "Normal" (= swp 0) perfect; the later judgement supersedes it.)
-
+- **Field order: what is on the card is the correct one** (the user, 2026-10-20, going by their eyes on the CRT and by the saved OSD setting
+  `Field order` = Normal, bit 66 = 0 in `config/vcopa.CFG`, last written 2026-10-18 22:15). The core on the card (seed 1604, md5 9b2584ec...) has
+  `swp` = 0 hard-wired: field 0 (aligned vsync, 263 lines) = even output rows, field 1 (vsync half a line early, 262 lines) = odd rows. The user says
+  the release's 1:1 mode looks reversed against it; its row parity reads the same in the code, so the cause is unproven (maybe which native
+  frame goes in which field). Issue #14 on `alphanu1/sega-model2-mister` reports exactly this. Do NOT flip `swp` (a flip was tried in the source
+  for an hour on 2026-10-20 and reverted).
 - The released `MiSTer` finds the flash by an OSD line (`-,GunCon flash on request;`, any dash line containing "GunCon flash") that the
   **core** announces. Host unit tests pass, but it has **not been run on the MiSTer with a core that has the line**: the last core build
   (the one with the line) was stopped on purpose. The Model 2 `.rbf` files in the fork's `releases/` predate the line, so with the released
