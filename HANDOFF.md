@@ -1,5 +1,22 @@
 # Handoff
 
+## 2026-10-22: the patched app and GunCal are now ON THE CARD
+
+- After a reboot the RAM-only copies were gone and the card ran the **stock** `MiSTer`, so nothing waited for the flash. Now installed
+  persistently over the UART: `/media/fat/MiSTer` = the patched app (patches 0001-0018, md5 f12dff4c...), the stock one kept as
+  `/media/fat/MiSTer.stock`; `GunCal.rbf` in `/media/fat/_Utility/`. (`update_all` replaces `MiSTer` with the stock one: copy ours back.)
+  The calibration before this was kept as `config/GUNCAL_uni_0b9a_016a_v1.cfg.bak-20261022`.
+- The user was running **`_Arcade/cores/Model2C_20261022.rbf`** (the core author's local `model2c` build, House of the Dead; its core name
+  reports as `Model2A`). It has no beacon and no OSD flash line, so the app aims from the game's own flash (`LIGHTGUN_CRT_MODE=1`, the default). The author's
+  `Gun flash` option is Virtua Cop only (a single white frame the GunCon may be too slow to read: first lit report after darkness has a junk Y). The
+  user's report on the stock app: "it flashes but clearly the GunCon 2 can't see it in time". **Not yet tried with the patched app and the gun in
+  House of the Dead**; if it still misses, record a `GUNDBG` trace (`build/MiSTer_tracker_debug`) of one shot and decide from the numbers.
+- Patch 0018: GunCal starts with the calibration screen (before, a saved calibration put it on the plain monitor page, and the PS1-style
+  screen needed a 3 s trigger hold nobody was told about). The sequence is still centre + four corners + check page.
+- A `LIGHTGUN_CRT_BEACON=2` override (ask a core for the flash without its OSD line) was written and dropped: Model2C has no beacon, and
+  the `[Model2]` section would also have matched the beacon build.
+- Pushing files: Git Bash rewrites `/media/...` arguments (`MSYS_NO_PATHCONV=1`), and the SSH key is not authorised on the MiSTer (UART only).
+
 ## Where things stand (2026-10-20)
 
 - **Point Blank (Namco NB-1 core, stock)**: works end to end on the user's CRT, "basically perfect" (2026-10-16).
@@ -38,12 +55,11 @@
 On the SD card: `_Arcade/cores/Model2.rbf` = the beacon build (seed 1604, md5 9b2584ec...), `Model2.rbf.bak` = the original; the user's
 calibration `config/GUNCAL_uni_0b9a_016a_v1.cfg`; `config/inputs/*_input_0b9a_016a_v3.map` (the gun's buttons, one per gun game, made by
 `tools/mister/make_gun_map.py`, which refuses to overwrite); `config/vcopa.CFG`; `_Arcade/_gun_test/` (two MRAs; `load_core` only takes
-MRAs under `/media/fat`). `MiSTer.ini` is the original. The stock `/media/fat/MiSTer` is untouched.
+MRAs under `/media/fat`). `MiSTer.ini` is the original. Since 2026-10-22 `/media/fat/MiSTer` is the patched app (stock: `MiSTer.stock`).
 
-RAM only (a reboot returns to stock): `/tmp/dbg/MiSTer25` (the previous patched app) bind-mounted over `/media/fat/MiSTer`. Bring up after a
-reboot: push the app with `tools/mister/serial_run.py pushz` (UART 115,200 baud, about 11 KB/s), `mount --bind`, `kill` the running app
-(nothing restarts it: `/etc/inittab` starts it once), `setsid /media/fat/MiSTer > /tmp/mister.log 2>&1 < /dev/null &`, then
-`echo "load_core <mra>" > /dev/MiSTer_cmd` under `timeout 8`.
+To replace the app: `pushz` it to `/media/fat/MiSTer.new` (UART 115,200 baud, about 11 KB/s, md5 checked), `mv -f` it over `MiSTer`, `kill` the
+running app (nothing restarts it: `/etc/inittab` starts it once, and launchers such as misterzine start it with arguments),
+`setsid /media/fat/MiSTer > /tmp/mister.log 2>&1 < /dev/null &`, then `echo "load_core <rbf or mra>" > /dev/MiSTer_cmd` under `timeout 8`.
 
 ## Build
 

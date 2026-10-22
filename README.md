@@ -45,7 +45,8 @@ the core's author as [alphanu1/sega-model2-mister#13](https://github.com/alphanu
 2. Copy `GunCal.rbf` to `/media/fat/_Utility/`.
 3. Plug the GunCon 2 into the MiSTer's USB. Its video plug goes to the picture's **sync** (the yellow RCA plug must carry the picture's sync,
    as for any GunCon 2 on a CRT); the MiSTer must output 15 kHz video with composite sync (`MiSTer.ini`: `vga_scaler=0`, `composite_sync=1`).
-4. **Calibrate once.** Menu, Utility, **GunCal**. Shoot the centre ring, then the four corner crosses (the screen flashes white on each shot;
+4. **Calibrate once.** Menu, Utility, **GunCal**. The calibration screen comes up at once (a saved calibration is replaced only when the five
+   shots are accepted). Shoot the centre ring, then the four corner crosses (the screen flashes white on each shot;
    the D-pad on the gun moves the targets in or out if your set hides the edges). A shot with no light is refused ("MISSED"); shots that do
    not lie on a line are refused ("BAD SHOTS"). After the fifth the fit is saved to `/media/fat/config/GUNCAL_uni_<vid>_<pid>_v1.cfg` and a
    check page shows a live crosshair: press **A or B** on the gun to finish. Holding the trigger for 3 seconds redoes it.
@@ -99,10 +100,10 @@ Settings can go in a section named for a core or an MRA set (for example `[Model
 
 ## What is in this repo
 
-- `patches/` seventeen patches to `Main_MiSTer` commit 13f1de9, in order (`0001` trace, `0002` the tracker, `0003` GunCal support and the
+- `patches/` eighteen patches to `Main_MiSTer` commit 13f1de9, in order (`0001` trace, `0002` the tracker, `0003` GunCal support and the
   universal mapping, `0004` aim from the flash, `0005`..`0013` timing log, interlaced cores, per-core sync table, gun windows, ... , `0014`
   tracker edges and the Model 2 inset, `0015` junk readings after a black frame, `0016` the tracker's decisions delivered on time, `0017` the
-  beacon). `patches/kernel/` is a one-line fix for the Linux driver (it keeps only the low byte of Y; the app compensates without it).
+  beacon, `0018` GunCal starts with the calibration screen). `patches/kernel/` is a one-line fix for the Linux driver (it keeps only the low byte of Y; the app compensates without it).
 - `cores/GunCal/` the calibration core (Quartus Lite 17.0; the framework `sys/` is fetched from Template_MiSTer at build time).
 - `scripts/` `build-main-mister.sh` (ARM build in WSL, runs the host unit tests, reproducible), `build-guncal.sh`, and the Quartus helpers.
 - `tools/mister/` helpers for the MiSTer's UART console and the analysis of gun traces (`GUNDBG=1` builds record every raw report).

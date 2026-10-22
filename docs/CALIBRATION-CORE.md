@@ -19,6 +19,10 @@ only where you actually shot. Hidden edges are reached by extrapolating the line
 
 ## The calibration (the PS1 GunCon screen's look)
 
+Loading the core starts the calibration at once, as a console game's own GunCon calibration does (an earlier version came up on the monitor page
+when a calibration was already saved, and the calibration was only reached by holding the trigger for 3 seconds). A saved calibration is replaced
+only when the five shots are accepted.
+
 Bright yellow-green background (so the gun always has light), a navy title box, olive prompt boxes with a cyan border, a blue ring
 target. Five targets are shot in turn: the centre, then the four corners. On each trigger pull the screen flashes white for about 100 ms
 and the first valid reports of the flash are the measurement (median of the reports in the next 300 ms). A shot with no light is
