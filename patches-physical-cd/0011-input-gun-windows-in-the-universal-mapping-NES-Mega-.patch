@@ -1,0 +1,199 @@
+From 8521841372bc724e3025baeadda3e72ad80ea0e0 Mon Sep 17 00:00:00 2001
+From: retrorepair <joelwhybrow@googlemail.com>
+Date: Sat, 17 Oct 2026 01:11:55 +0100
+Subject: [PATCH 11/27] input: gun windows in the universal mapping (NES, Mega
+ Drive)
+
+Some cores do not scale the gun over the picture they output. The mapping can now
+place the stick's minimum and maximum anywhere in the picture (guncal_core_timing
+has an optional window, in picture pixels, which may lie outside it).
+
+NES: the core scales over its PPU's own dots 0..255 and scanlines 0..239, which sit at
+an offset inside the picture (13 or 14 columns in on the wide overscan modes, one
+column and 8 rows out on the narrow 224-line one); told apart by the measured size.
+Mega Drive and Mega-CD: X over the picture width, but Y as a screen line directly
+(lg_y = stick - 8), so the stick spans lines -8..247 (Genesis_MiSTer lightgun.sv).
+
+Derived from the cores' source, within a pixel, not yet checked with the gun.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+(cherry picked from commit 807610a6a7d511ef1c5f56e52c5029b312778e99)
+---
+ guncal.cpp           | 13 +++++++++----
+ guncal.h             |  5 +++++
+ input.cpp            | 28 ++++++++++++++++++++++++++--
+ test/guncal_test.cpp | 27 ++++++++++++++++++++++++---
+ 4 files changed, 64 insertions(+), 9 deletions(-)
+
+diff --git a/guncal.cpp b/guncal.cpp
+index 87dd30b..0a14b28 100644
+--- a/guncal.cpp
++++ b/guncal.cpp
+@@ -102,13 +102,18 @@ int guncal_core_edges(const guncal_fit *f, const guncal_core_timing *t, int out[
+ 
+ 	double px_ns   = t->active_ns / t->width;                                       // time per picture pixel
+ 	double left_ns = t->hs_ns + t->de_h_ns;                                         // from HSync start to the first pixel
+-	double p_left  = left_ns / 100.0 - GUNCAL_CAL_HS_TO_PIC_PX;                     // in GunCal pixels
+-	double p_right = (left_ns + (t->width - 1) * px_ns) / 100.0 - GUNCAL_CAL_HS_TO_PIC_PX;
++	double wx0 = t->has_window ? t->wx0 : 0.0;
++	double wx1 = t->has_window ? t->wx1 : t->width - 1;
++	double wy0 = t->has_window ? t->wy0 : 0.0;
++	double wy1 = t->has_window ? t->wy1 : t->height - 1;
++	double p_left  = (left_ns + wx0 * px_ns) / 100.0 - GUNCAL_CAL_HS_TO_PIC_PX;     // in GunCal pixels
++	double p_right = (left_ns + wx1 * px_ns) / 100.0 - GUNCAL_CAL_HS_TO_PIC_PX;
+ 
+ 	// The gun counts lines since the last VSync, and every field of an interlaced picture has its own VSync, so a picture
+ 	// of `height` rows spans half as many gun lines. (The two fields start half a line apart: at most half a raw unit.)
+-	double y_top   = (t->vs_lines + t->de_v) - GUNCAL_CAL_VS_TO_PIC_LINES;          // in GunCal lines
+-	double y_bot   = y_top + (t->height - 1) * (t->interlaced ? 0.5 : 1.0);
++	double y_pic   = (t->vs_lines + t->de_v) - GUNCAL_CAL_VS_TO_PIC_LINES;          // the picture's first row, in GunCal lines
++	double y_top   = y_pic + wy0 * (t->interlaced ? 0.5 : 1.0);
++	double y_bot   = y_pic + wy1 * (t->interlaced ? 0.5 : 1.0);
+ 
+ 	out[0] = (int)floor(f->ay * y_top   + f->by + 0.5);
+ 	out[1] = (int)floor(f->ay * y_bot   + f->by + 0.5);
+diff --git a/guncal.h b/guncal.h
+index 138075a..bf79067 100644
+--- a/guncal.h
++++ b/guncal.h
+@@ -73,6 +73,11 @@ struct guncal_core_timing
+ 	double active_ns;           // duration of the picture part of a line (measured)
+ 	int    width, height;       // picture pixels per line, lines per frame (measured)
+ 	int    interlaced;          // the picture is interlaced: the gun counts lines within a field, so it spans height / 2 gun lines
++	// Where the core puts the gun's minimum and maximum, in picture pixels (column 0 / row 0 is the first of the measured
++	// picture; they may lie outside it). Most cores scale the gun over the picture they show, which is the default; the NES
++	// core scales it over its PPU's own dots and scanlines, which sit at an offset inside the picture it outputs.
++	int    has_window;
++	double wx0, wx1, wy0, wy1;
+ };
+ 
+ // Where the GunCal core puts things relative to its sync pulses: the picture starts 94 pixels (of 100 ns) after HSync
+diff --git a/input.cpp b/input.cpp
+index bb32d88..d465e4f 100644
+--- a/input.cpp
++++ b/input.cpp
+@@ -2127,6 +2127,27 @@ static const guncal_sync_entry guncal_sync_table[] =
+ 	{ "NES",      0, 4650, 3, "NES core: 25 dots at 5.37 MHz" },
+ };
+ 
++// The NES core scales the gun over the PPU's own dots (0..255) and scanlines (0..239) (NES_zapper.sv), not over the picture it
++// outputs. Which dots and lines it shows depends on its overscan option (NES_video.sv), and shows in the measured size: the
++// visible dots are 1..256 in the two narrow modes and 328..340 + 0..269 (283) or 327..340 + 0..269 (284) in the wide ones, so
++// dot 0 sits one column left of the picture or 13 / 14 columns in; the visible scanlines are 8..231 (224 lines), 0..239 (240) or
++// 261, 0..240 (242 lines), so scanline 0 is 8 rows above the picture, at its top, or one row in. NTSC only; derived from the
++// source, within a pixel, not yet checked with the gun.
++static void nes_gun_window(guncal_core_timing *t)
++{
++	if (t->width == 256 && t->height == 224)      { t->wx0 = -1; t->wx1 = 254; t->wy0 = -8; t->wy1 = 231; t->has_window = 1; }
++	else if (t->width == 256 && t->height == 240) { t->wx0 = -1; t->wx1 = 254; t->wy0 = 0;  t->wy1 = 239; t->has_window = 1; }
++	else if (t->width == 284 && t->height == 242) { t->wx0 = 14; t->wx1 = 269; t->wy0 = 1;  t->wy1 = 240; t->has_window = 1; }
++	else if (t->width == 283 && t->height == 242) { t->wx0 = 13; t->wx1 = 268; t->wy0 = 1;  t->wy1 = 240; t->has_window = 1; }
++}
++
++// The Mega Drive core (Genesis_MiSTer rtl/lightgun.sv) takes the gun's X over the whole picture width, but its Y as a screen line
++// directly, not scaled to the picture: lg_y = stick - 8 (clamped), so the stick's 0..255 spans lines -8..247.
++static void megadrive_gun_window(guncal_core_timing *t)
++{
++	t->wx0 = 0; t->wx1 = t->width - 1; t->wy0 = -8; t->wy1 = 247; t->has_window = 1;
++}
++
+ // Record what the framework measured of the running core's video (one line per change). This is what the mapping below
+ // is derived from, and the only way to see why it was skipped for a core (interlaced, incomplete, out of range).
+ static void guncal_log_video(const char *core, const VideoInfo *v)
+@@ -2181,6 +2202,7 @@ static void guncal_apply_universal(int i)
+ 		: (double)v->ptime * 10.0 / (double)v->ctime;
+ 
+ 	guncal_core_timing t;
++	memset(&t, 0, sizeof(t));
+ 	t.de_h_ns   = v->de_h * clk_vid_ns;
+ 	t.de_v      = v->de_v;
+ 	t.active_ns = v->ptime * 10.0;
+@@ -2198,6 +2220,8 @@ static void guncal_apply_universal(int i)
+ 		t.vs_lines = se->vs_lines;
+ 		break;
+ 	}
++	if (!strcasecmp(board, "NES")) nes_gun_window(&t);
++	else if (!strcasecmp(board, "MegaDrive") || !strcasecmp(board, "MegaCD")) megadrive_gun_window(&t);
+ 
+ 	// recompute when the measured timing or the assumed pulse width changes (the core name can change while a core starts)
+ 	uint32_t sig = v->width * 31u + v->height * 17u + v->htime * 13u + v->ptime * 7u + v->de_h * 5u + v->de_v * 3u + v->frame_clocks + v->ctime * 23u + (v->interlaced ? 1u : 0u) + (uint32_t)t.hs_ns * 11u + (uint32_t)t.vs_lines * 29u;
+@@ -2216,8 +2240,8 @@ static void guncal_apply_universal(int i)
+ 		FILE *lf = fopen("/tmp/guncal_apply.log", "a");
+ 		if (lf)
+ 		{
+-			fprintf(lf, "%s: picture %dx%d%s active %.0f ns, hs %.0f ns (vs %d lines), de_h %.0f ns, de_v %d -> raw x %d..%d, y %d..%d\n",
+-				label, t.width, t.height, t.interlaced ? " interlaced" : "", t.active_ns, t.hs_ns, t.vs_lines, t.de_h_ns, t.de_v, e[2], e[3], e[0], e[1]);
++			fprintf(lf, "%s: picture %dx%d%s active %.0f ns, hs %.0f ns (vs %d lines), de_h %.0f ns, de_v %d%s -> raw x %d..%d, y %d..%d\n",
++				label, t.width, t.height, t.interlaced ? " interlaced" : "", t.active_ns, t.hs_ns, t.vs_lines, t.de_h_ns, t.de_v, t.has_window ? ", gun window" : "", e[2], e[3], e[0], e[1]);
+ 			fclose(lf);
+ 		}
+ 	}
+diff --git a/test/guncal_test.cpp b/test/guncal_test.cpp
+index 7dfcd7d..d336ea9 100644
+--- a/test/guncal_test.cpp
++++ b/test/guncal_test.cpp
+@@ -229,7 +229,7 @@ static void test_edges_for_the_calibration_core_itself()
+ 	guncal_fit f = make_fit();
+ 	guncal_core_timing t;
+ 	t.hs_ns = 4600; t.vs_lines = 3;                 // GunCal: HSync 46 px, VSync 3 lines
+-	t.interlaced = 0;
++	t.interlaced = 0; t.has_window = 0;
+ 	t.de_h_ns = (638 - 590) * 100.0;                // HSync ends at pixel 590 of 638: 48 px to the picture
+ 	t.de_v = 262 - 248;                             // VSync ends at line 248 of 262
+ 	t.active_ns = 529 * 100.0; t.width = 529; t.height = 240;
+@@ -247,7 +247,7 @@ static void test_edges_for_the_nb1_core()
+ 	double px = 1e9 / 6.048e6;                      // 165.3 ns
+ 	guncal_core_timing t;
+ 	t.hs_ns = 32 * px; t.vs_lines = 3;
+-	t.interlaced = 0;
++	t.interlaced = 0; t.has_window = 0;
+ 	t.de_h_ns = (74 - 32) * px;
+ 	t.de_v = 33 - 3;
+ 	t.active_ns = 288 * px; t.width = 288; t.height = 224;
+@@ -273,7 +273,7 @@ static void test_edges_for_an_interlaced_core()
+ 	t.de_v = 15;
+ 	t.active_ns = 50000; t.width = 640; t.height = 480;
+ 	int e[4];
+-	t.interlaced = 0;
++	t.interlaced = 0; t.has_window = 0;
+ 	CHECK(guncal_core_edges(&f, &t, e));
+ 	int prog_span = e[1] - e[0];
+ 	t.interlaced = 1;
+@@ -284,6 +284,26 @@ static void test_edges_for_an_interlaced_core()
+ 	CHECK(abs((e2[1] - e2[0]) - (int)lround(AY * 239.5)) <= 1);
+ }
+ 
++// a core whose gun scales over its own coordinates (the NES: PPU dots 0..255, scanlines 0..239) rather than the picture it shows
++static void test_edges_with_a_gun_window()
++{
++	guncal_fit f = make_fit();
++	guncal_core_timing t;
++	memset(&t, 0, sizeof(t));
++	t.hs_ns = 4650; t.vs_lines = 3; t.de_h_ns = 4470; t.de_v = 15;
++	t.active_ns = 52890; t.width = 284; t.height = 242;       // measured NES core, wide mode
++	int base[4], win[4];
++	CHECK(guncal_core_edges(&f, &t, base));
++	t.has_window = 1; t.wx0 = 14; t.wx1 = 269; t.wy0 = 1; t.wy1 = 240;
++	CHECK(guncal_core_edges(&f, &t, win));
++	double px_ns = 52890.0 / 284;
++	// 14 picture pixels in from the left, 14 from the right (283 - 269), one row down and one row up
++	CHECK(abs((win[2] - base[2]) - (int)lround(AX * 14 * px_ns / 100.0)) <= 1);
++	CHECK(abs((base[3] - win[3]) - (int)lround(AX * 14 * px_ns / 100.0)) <= 1);
++	CHECK(abs((win[0] - base[0]) - (int)lround(AY * 1)) <= 1);
++	CHECK(abs((base[1] - win[1]) - (int)lround(AY * 1)) <= 1);
++}
++
+ static void test_edges_reject_nonsense()
+ {
+ 	guncal_fit f = make_fit();
+@@ -298,6 +318,7 @@ static void test_edges_reject_nonsense()
+ 
+ int main()
+ {
++	test_edges_with_a_gun_window();
+ 	test_edges_for_an_interlaced_core();
+ 	test_fit_recovers_the_line();
+ 	test_fit_rejects_bad_shots();
+-- 
+2.43.0
+

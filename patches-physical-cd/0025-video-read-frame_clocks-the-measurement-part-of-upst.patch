@@ -1,0 +1,45 @@
+From 36f78f5ba96edaefaa411b802e63be3c2f3ca35d Mon Sep 17 00:00:00 2001
+From: retrorepair <joelwhybrow@googlemail.com>
+Date: Fri, 23 Oct 2026 02:07:51 +0100
+Subject: [PATCH 25/27] video: read frame_clocks, the measurement part of
+ upstream d8c88df (#1260)
+
+The GunCon mapping (guncal_apply_universal) uses the clk_vid cycles of a whole
+frame that upstream Main_MiSTer reads since d8c88df. This fork is based on an
+older upstream; only the VideoInfo field and its read are carried here, exactly
+as upstream has them. The YC PHASE_INC change of that commit is not taken.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ video.cpp | 2 ++
+ video.h   | 1 +
+ 2 files changed, 3 insertions(+)
+
+diff --git a/video.cpp b/video.cpp
+index f9b9251..949f210 100644
+--- a/video.cpp
++++ b/video.cpp
+@@ -3015,6 +3015,8 @@ static bool get_video_info(bool force, VideoInfo *video_info)
+ 		video_info->pixrep = spi_w(0);
+ 		video_info->de_h = spi_w(0);
+ 		video_info->de_v = spi_w(0);
++		video_info->frame_clocks = spi_w(0);
++		video_info->frame_clocks |= (spi_w(0) & 0xFF) << 16;
+ 		video_info->interlaced = ( res & 0x100 ) != 0;
+ 		video_info->rotated = ( res & 0x200 ) != 0;
+ 	}
+diff --git a/video.h b/video.h
+index 0f02587..5ad6dfe 100644
+--- a/video.h
++++ b/video.h
+@@ -15,6 +15,7 @@ struct VideoInfo
+ 	uint32_t ptime;
+ 	uint32_t ctime;
+ 	uint32_t vtimeh;
++	uint32_t frame_clocks;
+ 	uint32_t arx;
+ 	uint32_t ary;
+ 	uint32_t arxy;
+-- 
+2.43.0
+

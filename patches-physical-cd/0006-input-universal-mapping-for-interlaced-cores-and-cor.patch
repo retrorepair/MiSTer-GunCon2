@@ -1,0 +1,177 @@
+From 5c2165739aeb3f299cb23f622b8413665116ee5c Mon Sep 17 00:00:00 2001
+From: retrorepair <joelwhybrow@googlemail.com>
+Date: Fri, 16 Oct 2026 23:50:29 +0100
+Subject: [PATCH 06/27] input: universal mapping for interlaced cores and cores
+ without frame_clocks
+
+A core's picture can be interlaced (the Super System 22 core outputs 640x480i):
+the gun counts lines within a field, so the picture spans height / 2 gun lines.
+The video clock for the horizontal offset comes from the cycles in a picture
+line when the framework does not report a frame's cycle count (interlaced
+pictures and older frameworks), instead of skipping the core.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+(cherry picked from commit bbc7ff6c727c4966a6382b12c681df0adc8c8589)
+---
+ guncal.cpp           |  4 +++-
+ guncal.h             |  1 +
+ input.cpp            | 22 ++++++++++++++--------
+ test/guncal_test.cpp | 26 ++++++++++++++++++++++++++
+ 4 files changed, 44 insertions(+), 9 deletions(-)
+
+diff --git a/guncal.cpp b/guncal.cpp
+index 45ef250..87dd30b 100644
+--- a/guncal.cpp
++++ b/guncal.cpp
+@@ -105,8 +105,10 @@ int guncal_core_edges(const guncal_fit *f, const guncal_core_timing *t, int out[
+ 	double p_left  = left_ns / 100.0 - GUNCAL_CAL_HS_TO_PIC_PX;                     // in GunCal pixels
+ 	double p_right = (left_ns + (t->width - 1) * px_ns) / 100.0 - GUNCAL_CAL_HS_TO_PIC_PX;
+ 
++	// The gun counts lines since the last VSync, and every field of an interlaced picture has its own VSync, so a picture
++	// of `height` rows spans half as many gun lines. (The two fields start half a line apart: at most half a raw unit.)
+ 	double y_top   = (t->vs_lines + t->de_v) - GUNCAL_CAL_VS_TO_PIC_LINES;          // in GunCal lines
+-	double y_bot   = y_top + (t->height - 1);
++	double y_bot   = y_top + (t->height - 1) * (t->interlaced ? 0.5 : 1.0);
+ 
+ 	out[0] = (int)floor(f->ay * y_top   + f->by + 0.5);
+ 	out[1] = (int)floor(f->ay * y_bot   + f->by + 0.5);
+diff --git a/guncal.h b/guncal.h
+index 807312f..138075a 100644
+--- a/guncal.h
++++ b/guncal.h
+@@ -72,6 +72,7 @@ struct guncal_core_timing
+ 	int    de_v;                // end of VSync to the first picture line, in lines (measured)
+ 	double active_ns;           // duration of the picture part of a line (measured)
+ 	int    width, height;       // picture pixels per line, lines per frame (measured)
++	int    interlaced;          // the picture is interlaced: the gun counts lines within a field, so it spans height / 2 gun lines
+ };
+ 
+ // Where the GunCal core puts things relative to its sync pulses: the picture starts 94 pixels (of 100 ns) after HSync
+diff --git a/input.cpp b/input.cpp
+index 525328f..cc7a61c 100644
+--- a/input.cpp
++++ b/input.cpp
+@@ -2109,15 +2109,15 @@ static void guncal_log_video(const char *core, const VideoInfo *v)
+ {
+ 	static char last_core[64] = "";
+ 	static uint32_t last_sig = 0;
+-	uint32_t sig = v->width * 31u + v->height * 17u + v->htime * 13u + v->ptime * 7u + v->vtime * 19u + v->de_h * 5u + v->de_v * 3u + v->frame_clocks + (v->interlaced ? 1u : 0u);
++	uint32_t sig = v->width * 31u + v->height * 17u + v->htime * 13u + v->ptime * 7u + v->vtime * 19u + v->ctime * 23u + v->de_h * 5u + v->de_v * 3u + v->frame_clocks + (v->interlaced ? 1u : 0u);
+ 	if (sig == last_sig && !strcmp(core, last_core)) return;
+ 	last_sig = sig;
+ 	snprintf(last_core, sizeof(last_core), "%s", core);
+ 
+ 	FILE *lf = fopen("/tmp/guncal_apply.log", "a");
+ 	if (!lf) return;
+-	fprintf(lf, "%s: video %ux%u%s htime %u ptime %u vtime %u frame_clocks %u de_h %u de_v %u\n", core, v->width, v->height, v->interlaced ? " interlaced" : "",
+-		v->htime, v->ptime, v->vtime, v->frame_clocks, v->de_h, v->de_v);
++	fprintf(lf, "%s: video %ux%u%s htime %u ptime %u vtime %u ctime %u frame_clocks %u de_h %u de_v %u\n", core, v->width, v->height, v->interlaced ? " interlaced" : "",
++		v->htime, v->ptime, v->vtime, v->ctime, v->frame_clocks, v->de_h, v->de_v);
+ 	fclose(lf);
+ }
+ 
+@@ -2133,15 +2133,21 @@ static void guncal_apply_universal(int i)
+ 	guncal_log_video(core, &current_video_info);
+ 
+ 	const VideoInfo *v = &current_video_info;
+-	if (!v->width || !v->height || !v->htime || !v->ptime || !v->vtime || !v->frame_clocks || v->interlaced) return;
++	if (!v->width || !v->height || !v->htime || !v->ptime || !v->vtime || (!v->frame_clocks && !v->ctime)) return;
++
++	// de_h is counted in the core's video clock cycles. A frame's cycle count is exact, but the framework does not report it
++	// for an interlaced picture or an older framework (it counts across both fields); the cycles in one picture line do.
++	double clk_vid_ns = v->frame_clocks && !v->interlaced
++		? (double)v->vtime * 10.0 / (double)v->frame_clocks                    // the framework counts in clk_vid cycles and 10 ns ticks
++		: (double)v->ptime * 10.0 / (double)v->ctime;
+ 
+ 	guncal_core_timing t;
+-	double clk_vid_ns = (double)v->vtime * 10.0 / (double)v->frame_clocks;    // the framework counts in clk_vid cycles and 10 ns ticks
+ 	t.de_h_ns   = v->de_h * clk_vid_ns;
+ 	t.de_v      = v->de_v;
+ 	t.active_ns = v->ptime * 10.0;
+ 	t.width     = v->width;
+ 	t.height    = v->height;
++	t.interlaced = v->interlaced;
+ 
+ 	// The framework does not measure the sync pulse widths: the usual 15 kHz values unless the core is known. MiSTer reports
+ 	// an arcade core by its MRA set name or, early in the load, by the core's own name.
+@@ -2151,7 +2157,7 @@ static void guncal_apply_universal(int i)
+ 	else if (!strcasecmp(core, "NES")) t.hs_ns = 4650.0;                                                                           // 25 dots at 5.37 MHz
+ 
+ 	// recompute when the measured timing or the assumed pulse width changes (the core name can change while a core starts)
+-	uint32_t sig = v->width * 31u + v->height * 17u + v->htime * 13u + v->ptime * 7u + v->de_h * 5u + v->de_v * 3u + v->frame_clocks + (uint32_t)t.hs_ns * 11u;
++	uint32_t sig = v->width * 31u + v->height * 17u + v->htime * 13u + v->ptime * 7u + v->de_h * 5u + v->de_v * 3u + v->frame_clocks + v->ctime * 23u + (v->interlaced ? 1u : 0u) + (uint32_t)t.hs_ns * 11u;
+ 	if (sig == input[i].uni_sig) return;
+ 	input[i].uni_sig = sig;
+ 
+@@ -2167,8 +2173,8 @@ static void guncal_apply_universal(int i)
+ 		FILE *lf = fopen("/tmp/guncal_apply.log", "a");
+ 		if (lf)
+ 		{
+-			fprintf(lf, "%s: picture %dx%d active %.0f ns, hs %.0f ns, de_h %.0f ns, de_v %d -> raw x %d..%d, y %d..%d\n",
+-				core, t.width, t.height, t.active_ns, t.hs_ns, t.de_h_ns, t.de_v, e[2], e[3], e[0], e[1]);
++			fprintf(lf, "%s: picture %dx%d%s active %.0f ns, hs %.0f ns, de_h %.0f ns, de_v %d -> raw x %d..%d, y %d..%d\n",
++				core, t.width, t.height, t.interlaced ? " interlaced" : "", t.active_ns, t.hs_ns, t.de_h_ns, t.de_v, e[2], e[3], e[0], e[1]);
+ 			fclose(lf);
+ 		}
+ 	}
+diff --git a/test/guncal_test.cpp b/test/guncal_test.cpp
+index 32c7f1c..7dfcd7d 100644
+--- a/test/guncal_test.cpp
++++ b/test/guncal_test.cpp
+@@ -229,6 +229,7 @@ static void test_edges_for_the_calibration_core_itself()
+ 	guncal_fit f = make_fit();
+ 	guncal_core_timing t;
+ 	t.hs_ns = 4600; t.vs_lines = 3;                 // GunCal: HSync 46 px, VSync 3 lines
++	t.interlaced = 0;
+ 	t.de_h_ns = (638 - 590) * 100.0;                // HSync ends at pixel 590 of 638: 48 px to the picture
+ 	t.de_v = 262 - 248;                             // VSync ends at line 248 of 262
+ 	t.active_ns = 529 * 100.0; t.width = 529; t.height = 240;
+@@ -246,6 +247,7 @@ static void test_edges_for_the_nb1_core()
+ 	double px = 1e9 / 6.048e6;                      // 165.3 ns
+ 	guncal_core_timing t;
+ 	t.hs_ns = 32 * px; t.vs_lines = 3;
++	t.interlaced = 0;
+ 	t.de_h_ns = (74 - 32) * px;
+ 	t.de_v = 33 - 3;
+ 	t.active_ns = 288 * px; t.width = 288; t.height = 224;
+@@ -259,6 +261,29 @@ static void test_edges_for_the_nb1_core()
+ 	CHECK(e[2] < e[3] && e[0] < e[1]);
+ }
+ 
++// an interlaced 640 x 480 core (Time Crisis on the Super System 22 core, measured): 63.58 us lines, 50 us picture,
++// picture starts 4.68 us after HSync ends and 15 lines after VSync ends, in every field
++static void test_edges_for_an_interlaced_core()
++{
++	guncal_fit f = make_fit();
++	guncal_core_timing t;
++	memset(&t, 0, sizeof(t));
++	t.hs_ns = 4700; t.vs_lines = 3;
++	t.de_h_ns = 4680;
++	t.de_v = 15;
++	t.active_ns = 50000; t.width = 640; t.height = 480;
++	int e[4];
++	t.interlaced = 0;
++	CHECK(guncal_core_edges(&f, &t, e));
++	int prog_span = e[1] - e[0];
++	t.interlaced = 1;
++	int e2[4];
++	CHECK(guncal_core_edges(&f, &t, e2));
++	CHECK(e2[0] == e[0] && e2[2] == e[2] && e2[3] == e[3]);        // the top and both sides do not depend on interlace
++	CHECK(abs((e2[1] - e2[0]) * 2 - prog_span) <= 2);              // 479 rows = 239.5 gun lines: half the progressive span
++	CHECK(abs((e2[1] - e2[0]) - (int)lround(AY * 239.5)) <= 1);
++}
++
+ static void test_edges_reject_nonsense()
+ {
+ 	guncal_fit f = make_fit();
+@@ -273,6 +298,7 @@ static void test_edges_reject_nonsense()
+ 
+ int main()
+ {
++	test_edges_for_an_interlaced_core();
+ 	test_fit_recovers_the_line();
+ 	test_fit_rejects_bad_shots();
+ 	test_five_points_beat_three_under_aim_noise();
+-- 
+2.43.0
+

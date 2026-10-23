@@ -1,0 +1,49 @@
+From d590d72a910f450fedbf226b7eb969c3c9470888 Mon Sep 17 00:00:00 2001
+From: retrorepair <joelwhybrow@googlemail.com>
+Date: Fri, 16 Oct 2026 23:53:49 +0100
+Subject: [PATCH 07/27] input: also log the core's J/j button fields
+ (measurement aid)
+
+Whenever the running core changes, append the J/j fields of its config string
+to /tmp/guncal_apply.log, so the gun's buttons can be mapped onto the core's
+own button list without reading the OSD.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+(cherry picked from commit 86d3f52d037e3c207fa4f903768de4334b1a2590)
+---
+ input.cpp | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/input.cpp b/input.cpp
+index cc7a61c..34d097a 100644
+--- a/input.cpp
++++ b/input.cpp
+@@ -2108,6 +2108,7 @@ static crtgun_state crtgun[NUMDEV];
+ static void guncal_log_video(const char *core, const VideoInfo *v)
+ {
+ 	static char last_core[64] = "";
++	static char last_conf_core[64] = "";
+ 	static uint32_t last_sig = 0;
+ 	uint32_t sig = v->width * 31u + v->height * 17u + v->htime * 13u + v->ptime * 7u + v->vtime * 19u + v->ctime * 23u + v->de_h * 5u + v->de_v * 3u + v->frame_clocks + (v->interlaced ? 1u : 0u);
+ 	if (sig == last_sig && !strcmp(core, last_core)) return;
+@@ -2118,6 +2119,17 @@ static void guncal_log_video(const char *core, const VideoInfo *v)
+ 	if (!lf) return;
+ 	fprintf(lf, "%s: video %ux%u%s htime %u ptime %u vtime %u ctime %u frame_clocks %u de_h %u de_v %u\n", core, v->width, v->height, v->interlaced ? " interlaced" : "",
+ 		v->htime, v->ptime, v->vtime, v->ctime, v->frame_clocks, v->de_h, v->de_v);
++
++	// the core's own button names and defaults (the J/j fields of its config string): what the gun's buttons must be mapped onto
++	if (strcmp(core, last_conf_core))
++	{
++		snprintf(last_conf_core, sizeof(last_conf_core), "%s", core);
++		for (int n = 0; n < 256; n++)
++		{
++			const char *f = user_io_get_confstr(n);     // NULL for an empty field as well as past the end
++			if (f && (f[0] == 'J' || f[0] == 'j')) fprintf(lf, "%s: confstr[%d] %.200s\n", core, n, f);
++		}
++	}
+ 	fclose(lf);
+ }
+ 
+-- 
+2.43.0
+

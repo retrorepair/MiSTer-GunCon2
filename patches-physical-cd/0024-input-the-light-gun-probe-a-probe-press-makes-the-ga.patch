@@ -1,0 +1,543 @@
+From 285b79154d8c852145cd3b412d19a01e178727ac Mon Sep 17 00:00:00 2001
+From: retrorepair <joelwhybrow@googlemail.com>
+Date: Fri, 23 Oct 2026 01:42:04 +0100
+Subject: [PATCH 24/27] input: the light-gun probe - a probe press makes the
+ game flash, the real press follows with the aim from that flash
+
+House of the Dead (the Model2C core, name Model2A) flashes for one field after the
+trigger and reads the gun at the end of it. Measured 2026-10-23: in a dark scene
+the GunCon 2's one lit report of that flash reaches the app 33..35 ms after the
+pull, after the game has read; the gun reports a field only once it has ended, so
+the shot cannot be given the aim from its own flash.
+
+With only the game's own flash and nothing changed in the core: on a pull the
+physical trigger is held back and the aim goes off the screen; a probe press is
+given (the game flashes and, with the gun off the screen, counts a reload); the
+first valid reading after the probe press is where the gun saw that flash; the
+probe press is released, the aim set, and once the game has seen the trigger up
+(35 ms) the real press is given with the aim already in place. No light within
+100 ms of the probe press means the gun is off the screen and the probe press
+was the reload. Costs: a reload with every shot, two flashes, the shot reaches
+the game about 80 ms after the pull.
+
+For the cores in crtgun_probe_cores (Model2A); LIGHTGUN_CRT_PROBE=0 turns it off.
+The GUNDBG out trace gains pb_phase and pb_pressed and logs every 2 ms tick of a
+probe sequence.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+(cherry picked from commit 3a1ae2fc50ec91a7b090d969e8d0a49eb3c75083)
+---
+ cfg.cpp                    |   2 +
+ cfg.h                      |   1 +
+ input.cpp                  |  42 +++++++++++--
+ lightgun_crt.cpp           | 101 ++++++++++++++++++++++++++++++-
+ lightgun_crt.h             |  34 +++++++++++
+ test/lightgun_crt_test.cpp | 119 +++++++++++++++++++++++++++++++++++--
+ 6 files changed, 287 insertions(+), 12 deletions(-)
+
+diff --git a/cfg.cpp b/cfg.cpp
+index 2cbfb3a..82e982c 100644
+--- a/cfg.cpp
++++ b/cfg.cpp
+@@ -168,6 +168,7 @@ static const ini_var_t ini_vars[] =
+ 	{ "LIGHTGUN_CRT_SHOT_MS", (void *)(&(cfg.lightgun_crt_shot_ms)), UINT16, 0, 2000 },
+ 	{ "LIGHTGUN_CRT_DARK_MS", (void *)(&(cfg.lightgun_crt_dark_ms)), UINT16, 0, 5000 },
+ 	{ "LIGHTGUN_CRT_BEACON", (void *)(&(cfg.lightgun_crt_beacon)), UINT8, 0, 1 },
++	{ "LIGHTGUN_CRT_PROBE", (void *)(&(cfg.lightgun_crt_probe)), UINT8, 0, 1 },
+ };
+ 
+ static const int nvars = (int)(sizeof(ini_vars) / sizeof(ini_var_t));
+@@ -628,6 +629,7 @@ void cfg_parse()
+ 	cfg.lightgun_crt_shot_ms = 400;
+ 	cfg.lightgun_crt_dark_ms = 500;
+ 	cfg.lightgun_crt_beacon = 1;
++	cfg.lightgun_crt_probe = 1;
+ 	cfg.wheel_force = 50;
+ 	cfg.dvi_mode = 2;
+ 	cfg.lookahead = 1;
+diff --git a/cfg.h b/cfg.h
+index 0376acd..9fb7d61 100644
+--- a/cfg.h
++++ b/cfg.h
+@@ -99,6 +99,7 @@ typedef struct {
+ 	uint16_t lightgun_crt_shot_ms;
+ 	uint16_t lightgun_crt_dark_ms;
+ 	uint8_t lightgun_crt_beacon;
++	uint8_t lightgun_crt_probe;
+ 	uint8_t rumble;
+ 	uint8_t wheel_force;
+ 	uint16_t wheel_range;
+diff --git a/input.cpp b/input.cpp
+index 98469af..37d69a3 100644
+--- a/input.cpp
++++ b/input.cpp
+@@ -2091,9 +2091,9 @@ static void gundbg_log_out(int dev, const crtgun_state *st, uint32_t t_ms)
+ 		f = fopen("/tmp/gundbg_out.csv", "w");
+ 		if (!f) return;
+ 		setvbuf(f, NULL, _IOLBF, 0);
+-		fprintf(f, "dev,t_ms,raw_x,raw_y,trig,shot,out_x,out_y,offscreen,pub_x,pub_y,pub_off,bc_phase,bc_req\n");
++		fprintf(f, "dev,t_ms,raw_x,raw_y,trig,shot,out_x,out_y,offscreen,pub_x,pub_y,pub_off,bc_phase,bc_req,pb_phase,pb_pressed\n");
+ 	}
+-	bytes += fprintf(f, "%d,%u,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n", dev, (unsigned)t_ms, (int)st->raw_x, (int)st->raw_y, (int)st->trig, (int)st->shot, (int)st->out_x, (int)st->out_y, (int)st->offscreen, (int)st->pub_x, (int)st->pub_y, (int)st->pub_off, (int)st->bc_phase, (int)st->bc_req);
++	bytes += fprintf(f, "%d,%u,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n", dev, (unsigned)t_ms, (int)st->raw_x, (int)st->raw_y, (int)st->trig, (int)st->shot, (int)st->out_x, (int)st->out_y, (int)st->offscreen, (int)st->pub_x, (int)st->pub_y, (int)st->pub_off, (int)st->bc_phase, (int)st->bc_req, (int)st->pb_phase, (int)st->pb_pressed);
+ 	if (now != last_flush)
+ 	{
+ 		fflush(f);
+@@ -2311,6 +2311,20 @@ static bool crtgun_beacon_core(void)
+ 	return answer;
+ }
+ 
++// Cores whose game flashes for one field after the trigger and reads the gun at the end of it, before the GunCon 2 can report that field
++// (lightgun_crt.h, "Probe"): each shot is preceded by a probe press that makes the game flash. By the core's own name. LIGHTGUN_CRT_PROBE=0 turns it off.
++static const char *crtgun_probe_cores[] = {
++	"Model2A",      // House of the Dead (the Model2C core reports this name), measured 2026-10-23: flash report 33..35 ms after the pull, read before it
++};
++
++static bool crtgun_probe_core(void)
++{
++	if (!cfg.lightgun_crt_probe) return false;
++	const char *c = user_io_get_core_name(1);
++	for (size_t n = 0; n < sizeof(crtgun_probe_cores) / sizeof(*crtgun_probe_cores); n++) if (!strcasecmp(c, crtgun_probe_cores[n])) return true;
++	return false;
++}
++
+ static void crtgun_get_params(int i, crtgun_params *p)
+ {
+ 	guncal_apply_universal(i);
+@@ -2326,6 +2340,7 @@ static void crtgun_get_params(int i, crtgun_params *p)
+ 	p->mode = cfg.lightgun_crt_mode;
+ 	p->beacon = crtgun_beacon_core() ? 1 : 0;
+ 	if (p->beacon) p->mode = 0;       // the beacon measures every shot itself; between shots the aim just follows the gun
++	p->probe = !p->beacon && crtgun_probe_core() ? 1 : 0;
+ }
+ 
+ // Mode 1 (aim from the game's flash): the core is given the held aim, not the gun's raw axes. Send it whenever it changes.
+@@ -2397,16 +2412,22 @@ static void crtgun_beacon_apply(int i, const crtgun_params *p)
+ 		user_io_joystick_word(3, req ? 1u : 0u);
+ 		crtgun_bc_req_sent[i] = req;
+ 	}
++	if (p->probe)
++	{
++		// a release always before a press: the probe's press and release can both be due in one poll
++		if (crtgun[i].pb_ev_release) { crtgun[i].pb_ev_release = false; crtgun_give_trigger(i, false); }
++		if (crtgun[i].pb_ev_press)   { crtgun[i].pb_ev_press = false;   crtgun_give_trigger(i, true); }
++	}
+ 	if (!p->beacon) return;
+ 	if (crtgun[i].bc_ev_release) { crtgun[i].bc_ev_release = false; crtgun_give_trigger(i, false); }
+ 	if (crtgun[i].bc_ev_press)   { crtgun[i].bc_ev_press = false;   crtgun_give_trigger(i, true); }
+ }
+ 
+-// True if this event is the trigger of a gun whose trigger the beacon holds back (the tracker has already been given it).
++// True if this event is the trigger of a gun whose trigger the beacon or the probe holds back (the tracker has already been given it).
+ static bool crtgun_beacon_holds(int i, const struct input_event *ev)
+ {
+ 	if (!cfg.lightgun_crt_tracker || ev->type != EV_KEY || ev->code != GUNCON2_TRIGGER_CODE) return false;
+-	if (mapping || user_io_osd_is_visible() || !crtgun_beacon_core()) return false;
++	if (mapping || user_io_osd_is_visible() || !(crtgun_beacon_core() || crtgun_probe_core())) return false;
+ 	return input[i].quirk == QUIRK_LIGHTGUN_CRT;
+ }
+ 
+@@ -2419,12 +2440,12 @@ static void crtgun_tick(void)
+ 	static uint32_t next = 0;
+ 	if (!cfg.lightgun_crt_tracker) return;
+ 	if (next && !CheckTimer(next)) return;
+-	next = GetTimer(8);
+ 
+ 	struct timespec ts;
+ 	clock_gettime(CLOCK_REALTIME, &ts);
+ 	uint32_t now = (uint32_t)ts.tv_sec * 1000u + (uint32_t)(ts.tv_nsec / 1000000);
+ 
++	bool busy = false;
+ 	for (int i = 0; i < NUMDEV; i++)
+ 	{
+ 		if (input[i].quirk != QUIRK_LIGHTGUN_CRT || !crtgun_sent_ok[i]) continue;    // a gun that has reported at least once
+@@ -2432,9 +2453,18 @@ static void crtgun_tick(void)
+ 		crtgun_get_params(i, &p);
+ 		crtgun_update(&crtgun[i], &p, now);
+ 		crtgun_beacon_poll(&crtgun[i], &p, now);
++		crtgun_probe_poll(&crtgun[i], &p, now);
+ 		crtgun_deliver(i, &p);
+ 		crtgun_beacon_apply(i, &p);
++		if (p.probe && ((crtgun[i].pb_phase != 0 && crtgun[i].pb_phase != 4) || crtgun[i].pb_pressed))
++		{
++			busy = true;
++#ifdef GUNDBG
++			gundbg_log_out(i, &crtgun[i], now);         // the presses are timed here, between gun reports
++#endif
++		}
+ 	}
++	next = GetTimer(busy ? 2 : 8);      // a probe sequence times its presses in a few ms
+ }
+ 
+ // Feed one raw evdev event of a CRT lightgun to the tracker (lightgun_crt.cpp).
+@@ -2453,6 +2483,7 @@ static void crtgun_feed(int i, const struct input_event *ev)
+ 	{
+ 		crtgun_set_trigger(&crtgun[i], ev->value != 0, now, &p);
+ 		if (p.beacon && !mapping && !user_io_osd_is_visible()) crtgun_beacon_trigger(&crtgun[i], &p, ev->value != 0, now);
++		if (p.probe && !mapping && !user_io_osd_is_visible()) crtgun_probe_trigger(&crtgun[i], &p, ev->value != 0, now);
+ 		crtgun_update(&crtgun[i], &p, now);
+ 	}
+ 	else if (ev->type == EV_SYN)
+@@ -2465,6 +2496,7 @@ static void crtgun_feed(int i, const struct input_event *ev)
+ 	}
+ 
+ 	crtgun_beacon_poll(&crtgun[i], &p, now);
++	crtgun_probe_poll(&crtgun[i], &p, now);
+ 	crtgun_deliver(i, &p);
+ 	crtgun_beacon_apply(i, &p);
+ 
+diff --git a/lightgun_crt.cpp b/lightgun_crt.cpp
+index 66f92fe..7d6c82b 100644
+--- a/lightgun_crt.cpp
++++ b/lightgun_crt.cpp
+@@ -44,7 +44,7 @@ static void publish(crtgun_state *s, const crtgun_params *p, uint32_t now_ms)
+ {
+ 	if (p->beacon && s->bc_phase != 0) return;      // a beacon measurement (or its hold) owns the aim
+ 
+-	if (p->mode != 1)
++	if (p->mode != 1 && !p->probe)
+ 	{
+ 		s->pub_x = s->out_x;
+ 		s->pub_y = s->out_y;
+@@ -60,12 +60,14 @@ static void publish(crtgun_state *s, const crtgun_params *p, uint32_t now_ms)
+ 		s->pub_off = false;
+ 	}
+ 
++	if (p->probe) return;                           // the probe sequence owns the aim (crtgun_probe_poll)
++
+ 	if (s->win_open && (uint32_t)(now_ms - s->win_t0) > p->shot_ms) s->win_open = false;
+ }
+ 
+ void crtgun_set_trigger(crtgun_state *s, bool down, uint32_t now_ms, const crtgun_params *p)
+ {
+-	if (down && !s->trig && p->mode == 1)
++	if (down && !s->trig && p->mode == 1 && !p->probe)
+ 	{
+ 		// Nothing is known about this shot until the gun sees the game's flash. Until then the gun has seen no light for it, which is
+ 		// what a light gun's latch says at the start of every shot: off the screen. Nothing seen before the pull is used. The flash
+@@ -241,7 +243,7 @@ void crtgun_report(crtgun_state *s, const crtgun_params *p, uint32_t now_ms)
+ 	}
+ 	crtgun_beacon_poll(s, p, now_ms);
+ 
+-	if (p->mode == 1 && s->win_open && crtgun_valid(s, p))
++	if (p->mode == 1 && !p->probe && s->win_open && crtgun_valid(s, p))
+ 	{
+ 		// the gun has seen the game's flash: where it saw it is the shot, held until the next pull (later readings are the scene again)
+ 		s->pub_x = s->raw_x;
+@@ -249,4 +251,97 @@ void crtgun_report(crtgun_state *s, const crtgun_params *p, uint32_t now_ms)
+ 		s->pub_off = false;
+ 		s->win_open = false;
+ 	}
++
++	// probe: the first valid reading after the probe press is where the gun saw the flash it caused
++	if (p->probe && (s->pb_phase == 2 || s->pb_phase == 3) && !s->pb_seen && (int32_t)(now_ms - s->pb_probe_t) > 0 && crtgun_valid(s, p))
++	{
++		s->pb_x = s->raw_x;
++		s->pb_y = s->raw_y;
++		s->pb_seen = true;
++	}
++	crtgun_probe_poll(s, p, now_ms);
++}
++
++static void pb_press(crtgun_state *s, uint32_t now_ms)
++{
++	s->pb_pressed = true;
++	s->pb_press_t = now_ms;
++	s->pb_ev_press = true;
++}
++
++static void pb_release(crtgun_state *s, uint32_t now_ms)
++{
++	s->pb_pressed = false;
++	s->pb_rel_t = now_ms;
++	s->pb_rel_seen = true;
++	s->pb_ev_release = true;
++}
++
++void crtgun_probe_trigger(crtgun_state *s, const crtgun_params *p, bool down, uint32_t now_ms)
++{
++	if (!p->probe) return;
++	if (down && !s->pb_trig_in && (s->pb_phase == 0 || s->pb_phase == 4))
++	{
++		// A new shot (a pull while one is being measured is part of it). If the core still has the last real press down it goes up first,
++		// and the probe press waits until the game has seen the trigger up.
++		if (s->pb_pressed) pb_release(s, now_ms);
++		s->pb_phase = 1;
++		s->pb_t0 = now_ms;
++		s->pb_seen = false;
++		s->pub_init = true;
++		s->pub_off = true;                          // nothing seen for this shot yet
++	}
++	s->pb_trig_in = down;
++}
++
++void crtgun_probe_poll(crtgun_state *s, const crtgun_params *p, uint32_t now_ms)
++{
++	if (!p->probe) return;
++	bool up_long = !s->pb_rel_seen || (uint32_t)(now_ms - s->pb_rel_t) >= CRTGUN_PB_GAP_MS;
++
++	switch (s->pb_phase)
++	{
++	case 1:     // the aim is off the screen: the probe press
++		if ((uint32_t)(now_ms - s->pb_t0) >= CRTGUN_PB_LEAD_MS && up_long)
++		{
++			pb_press(s, now_ms);
++			s->pb_probe_t = now_ms;
++			s->pb_phase = 2;
++		}
++		break;
++
++	case 2:     // the game flashes; the probe press goes up when it has lasted long enough
++		if ((uint32_t)(now_ms - s->pb_press_t) >= CRTGUN_PB_PRESS_MS)
++		{
++			pb_release(s, now_ms);
++			s->pb_phase = 3;
++		}
++		break;
++
++	case 3:
++		if (s->pb_seen)
++		{
++			// the aim goes on the screen only once the probe press is up, then the real press follows with it in place
++			if ((uint32_t)(now_ms - s->pb_rel_t) >= CRTGUN_PB_LEAD_MS)
++			{
++				s->pub_x = s->pb_x;
++				s->pub_y = s->pb_y;
++				s->pub_off = false;
++			}
++			if (!s->pub_off && up_long)
++			{
++				pb_press(s, now_ms);
++				s->pb_phase = 4;
++			}
++		}
++		else if ((uint32_t)(now_ms - s->pb_probe_t) >= CRTGUN_PB_GIVEUP_MS)
++		{
++			s->pb_phase = 0;                        // no light: the gun is off the screen, and the probe press was the reload
++		}
++		break;
++
++	case 4:     // the real press stays down while the trigger is held, and at least CRTGUN_PB_PRESS_MS
++		if (s->pb_pressed && !s->pb_trig_in && (uint32_t)(now_ms - s->pb_press_t) >= CRTGUN_PB_PRESS_MS) pb_release(s, now_ms);
++		break;
++	}
+ }
+diff --git a/lightgun_crt.h b/lightgun_crt.h
+index 72668c1..2a118ce 100644
+--- a/lightgun_crt.h
++++ b/lightgun_crt.h
+@@ -44,6 +44,7 @@ struct crtgun_params
+ 	int32_t  edge_pct;      // percentage of each axis span, from each edge, that counts as "edge"
+ 	int32_t  mode;          // 0 continuous, 1 aim from the game's flash (see above)
+ 	int32_t  beacon;        // 1: the core flashes the whole picture white when asked (see "Beacon" below); 0: it cannot
++	int32_t  probe;         // 1: the game's flash is read before the gun can report it, so a probe press makes it flash first (see "Probe" below)
+ };
+ 
+ // Beacon. A CRT gun reads only where there is light: a dark enemy, or a dark patch of the picture, gives it nothing and the aim is lost,
+@@ -58,6 +59,19 @@ struct crtgun_params
+ #define CRTGUN_BC_HOLD_MS     250   // the measured aim is held this long after the trigger is given (the game reads it a frame or two later)
+ #define CRTGUN_BC_MIN_PRESS_MS 40   // the trigger is given to the core for at least this long (its I/O board scans at 1 kHz)
+ 
++// Probe. Some games flash for one field after the trigger and read the gun at the end of that field (House of the Dead, measured 2026-10-23:
++// the gun's one lit report of the flash reaches the app 33..35 ms after the pull, after the game has read). The GunCon 2 reports a field only
++// after it ends, so the shot cannot be given the aim from its own flash in time. Instead, with only the game's own flash and nothing changed in the
++// core: on a pull the physical trigger is held back and the aim goes off the screen; a probe press is given (the game flashes, and with the gun
++// off the screen it counts a reload); the first valid reading after the probe press is where the gun saw that flash; the probe press is released,
++// the aim is set to that reading, and once the game has seen the trigger up the real press is given with the aim already in place, so the game
++// reads it whenever it looks. No light after the probe press means the gun is off the screen, and the probe press was the reload.
++// Costs: every shot also reloads, two flashes, and the shot reaches the game about 75 ms after the pull.
++#define CRTGUN_PB_LEAD_MS      3    // the aim is off the screen this long before the probe press (the Model 2 I/O board scans at 1 kHz)
++#define CRTGUN_PB_PRESS_MS     40   // each press given to the core lasts at least this long
++#define CRTGUN_PB_GAP_MS       35   // the trigger is up this long before a press, so the game sees it up (two fields)
++#define CRTGUN_PB_GIVEUP_MS    100  // no light this long after the probe press: the gun is off the screen
++
+ struct crtgun_state
+ {
+ 	int32_t  raw_x, raw_y;  // latest raw report
+@@ -95,6 +109,21 @@ struct crtgun_state
+ 	bool     bc_rel_pending;// the trigger came up before (or just after) the press: give the release once the press has been long enough
+ 	bool     bc_ev_press;   // event for the caller: give the core the trigger press now (the caller clears it)
+ 	bool     bc_ev_release; // event for the caller: give the core the trigger release now (the caller clears it)
++
++	// probe (params.probe)
++	int      pb_phase;      // 0 idle (the aim holds the last shot), 1 aim off the screen, probe press due, 2 probe press given,
++	                        // 3 probe press released, real press due once the flash is seen, 4 real press given
++	uint32_t pb_t0;         // the pull
++	uint32_t pb_probe_t;    // when the probe press was given (only readings after it are the flash)
++	uint32_t pb_press_t;    // when the press now down was given
++	uint32_t pb_rel_t;      // when the core was last given a release
++	bool     pb_rel_seen;   // pb_rel_t is valid
++	bool     pb_seen;       // the flash has been seen at pb_x / pb_y
++	int32_t  pb_x, pb_y;
++	bool     pb_trig_in;    // the physical trigger is down
++	bool     pb_pressed;    // the core has the trigger down
++	bool     pb_ev_press;   // event for the caller: give the core the trigger press now (the caller clears it)
++	bool     pb_ev_release; // event for the caller: give the core the trigger release now (the caller clears it)
+ };
+ 
+ #define CRTGUN_DEF_X_VALID_MIN 16
+@@ -121,6 +150,11 @@ void crtgun_report(crtgun_state *s, const crtgun_params *p, uint32_t now_ms);
+ void crtgun_beacon_trigger(crtgun_state *s, const crtgun_params *p, bool down, uint32_t now_ms);
+ void crtgun_beacon_poll(crtgun_state *s, const crtgun_params *p, uint32_t now_ms);
+ 
++// Probe: the physical trigger changed (call instead of letting the press and release reach the core), and the poll that runs the sequence
++// (call after every event and every few ms). The caller gives the core the trigger press / release on pb_ev_press / pb_ev_release.
++void crtgun_probe_trigger(crtgun_state *s, const crtgun_params *p, bool down, uint32_t now_ms);
++void crtgun_probe_poll(crtgun_state *s, const crtgun_params *p, uint32_t now_ms);
++
+ // True if the gun reports light at all (raw X at or above the "no light" level).
+ static inline bool crtgun_lit(const crtgun_state *s, const crtgun_params *p)
+ {
+diff --git a/test/lightgun_crt_test.cpp b/test/lightgun_crt_test.cpp
+index a6e1d4a..b35e395 100644
+--- a/test/lightgun_crt_test.cpp
++++ b/test/lightgun_crt_test.cpp
+@@ -8,13 +8,16 @@ static int failures = 0;
+ #define CHECK(cond) do { if (!(cond)) { printf("FAIL line %d: %s\n", __LINE__, #cond); failures++; } } while (0)
+ 
+ // default GunCon 2 calibration used by Main_MiSTer: X 145..700, Y 25..245
+-static crtgun_params P = { 145, 700, 25, 245, CRTGUN_DEF_X_VALID_MIN, CRTGUN_DEF_SHOT_MS, CRTGUN_DEF_DARK_MS, CRTGUN_DEF_EDGE_PCT, 0, 0 };
++static crtgun_params P = { 145, 700, 25, 245, CRTGUN_DEF_X_VALID_MIN, CRTGUN_DEF_SHOT_MS, CRTGUN_DEF_DARK_MS, CRTGUN_DEF_EDGE_PCT, 0, 0, 0 };
+ 
+ // the same box with the aim taken from the game's flash
+-static crtgun_params P1 = { 145, 700, 25, 245, CRTGUN_DEF_X_VALID_MIN, CRTGUN_DEF_SHOT_MS, CRTGUN_DEF_DARK_MS, CRTGUN_DEF_EDGE_PCT, 1, 0 };
++static crtgun_params P1 = { 145, 700, 25, 245, CRTGUN_DEF_X_VALID_MIN, CRTGUN_DEF_SHOT_MS, CRTGUN_DEF_DARK_MS, CRTGUN_DEF_EDGE_PCT, 1, 0, 0 };
+ 
+ // the same box for a core that can flash the picture white on request
+-static crtgun_params PB = { 145, 700, 25, 245, CRTGUN_DEF_X_VALID_MIN, CRTGUN_DEF_SHOT_MS, CRTGUN_DEF_DARK_MS, CRTGUN_DEF_EDGE_PCT, 0, 1 };
++static crtgun_params PB = { 145, 700, 25, 245, CRTGUN_DEF_X_VALID_MIN, CRTGUN_DEF_SHOT_MS, CRTGUN_DEF_DARK_MS, CRTGUN_DEF_EDGE_PCT, 0, 1, 0 };
++
++// the same box for a game that reads its one-field flash before the gun can report it (the probe)
++static crtgun_params PP = { 145, 700, 25, 245, CRTGUN_DEF_X_VALID_MIN, CRTGUN_DEF_SHOT_MS, CRTGUN_DEF_DARK_MS, CRTGUN_DEF_EDGE_PCT, 1, 0, 1 };
+ 
+ struct Rig
+ {
+@@ -26,7 +29,10 @@ struct Rig
+ 	void report(uint32_t at, int x, int y) { t = at; crtgun_set_axis(&s, true, x, pp); crtgun_set_axis(&s, false, y, pp); crtgun_update(&s, pp, t); crtgun_report(&s, pp, t); }
+ 	void trigger(uint32_t at, bool down) { t = at; crtgun_set_trigger(&s, down, t, pp); crtgun_update(&s, pp, t); }
+ 	void bc_trigger(uint32_t at, bool down) { t = at; crtgun_beacon_trigger(&s, pp, down, t); crtgun_update(&s, pp, t); crtgun_beacon_poll(&s, pp, t); }
+-	void poll(uint32_t at) { t = at; crtgun_update(&s, pp, t); crtgun_beacon_poll(&s, pp, t); }
++	void poll(uint32_t at) { t = at; crtgun_update(&s, pp, t); crtgun_beacon_poll(&s, pp, t); crtgun_probe_poll(&s, pp, t); }
++	void pb_trigger(uint32_t at, bool down) { t = at; crtgun_set_trigger(&s, down, t, pp); crtgun_probe_trigger(&s, pp, down, t); crtgun_update(&s, pp, t); crtgun_probe_poll(&s, pp, t); }
++	bool take_press()   { bool e = s.pb_ev_press;   s.pb_ev_press = false;   return e; }
++	bool take_release() { bool e = s.pb_ev_release; s.pb_ev_release = false; return e; }
+ };
+ 
+ static void test_tracking_passes_through()
+@@ -393,8 +399,113 @@ static void test_beacon_hold_expires_and_the_aim_follows_the_gun_again()
+ 	CHECK(r.s.pub_x == 430 && r.s.pub_y == 141);
+ }
+ 
++// ---- probe: a probe press makes the game flash, the real press follows with the aim from that flash
++
++// the House of the Dead trace: dark scene, the flash is one lit report 34 ms after the press
++static void test_probe_dark_scene_shot()
++{
++	Rig r(&PP);
++	for (int i = 0; i < 10; i++) r.report(800 + i * 17, i & 1, 5);
++	r.pb_trigger(1000, true);
++	CHECK(r.s.pub_off && r.s.pb_phase == 1 && !r.take_press());             // the aim is off the screen, the physical trigger held back
++	r.poll(1002);
++	CHECK(!r.take_press());
++	r.poll(1003);
++	CHECK(r.take_press() && r.s.pb_phase == 2);                             // the probe press
++	r.report(1020, 1, 5);
++	r.report(1037, 420, 135);                                                // the flash it caused
++	CHECK(r.s.pb_seen && r.s.pub_off);                                       // seen, but off the screen while the probe press is down
++	r.poll(1043);
++	CHECK(r.take_release() && r.s.pb_phase == 3 && r.s.pub_off);            // the probe press goes up after 40 ms
++	r.poll(1046);
++	CHECK(!r.s.pub_off && r.s.pub_x == 420 && r.s.pub_y == 135 && !r.take_press());   // the aim is in place before the real press
++	r.pb_trigger(1050, false);                                               // the player lets go: nothing reaches the core
++	CHECK(!r.take_release() && !r.take_press());
++	r.poll(1077);
++	CHECK(!r.take_press());
++	r.poll(1078);
++	CHECK(r.take_press() && r.s.pb_phase == 4 && r.s.pub_x == 420);         // the trigger has been up 35 ms: the real press
++	r.poll(1117);
++	CHECK(!r.take_release());
++	r.poll(1118);
++	CHECK(r.take_release());                                                 // a real press lasts 40 ms
++	r.report(1200, 500, 200);                                                // the scene afterwards does not move the shot
++	CHECK(r.s.pub_x == 420 && r.s.pub_y == 135 && !r.s.pub_off);
++}
++
++static void test_probe_no_light_is_the_reload()
++{
++	Rig r(&PP);
++	r.report(900, 420, 135);
++	r.report(950, 0, 5);                                                     // swung off the screen
++	r.pb_trigger(1000, true);
++	r.poll(1003);
++	CHECK(r.take_press());
++	r.report(1020, 1, 5);
++	r.report(1037, 0, 5);                                                    // no flash where the gun points
++	r.poll(1043);
++	CHECK(r.take_release());
++	r.report(1054, 1, 5);
++	r.report(1071, 0, 5);
++	r.report(1088, 1, 5);
++	r.poll(1102);
++	CHECK(r.s.pb_phase == 3 && !r.take_press());
++	r.poll(1103);
++	CHECK(r.s.pb_phase == 0 && !r.take_press() && r.s.pub_off);             // no light: the probe press was the reload, nothing else is sent
++	r.report(1200, 430, 140);
++	CHECK(r.s.pub_off);
++}
++
++// the report that carries the pull (and anything up to the probe press) is the picture before the game knew of the shot, not its flash
++static void test_probe_light_before_the_probe_press_is_not_the_flash()
++{
++	Rig r(&PP);
++	r.report(990, 400, 130);
++	r.pb_trigger(1000, true);
++	r.report(1000, 400, 130);
++	r.poll(1003);
++	CHECK(r.take_press() && !r.s.pb_seen);
++	r.report(1003, 401, 130);                                                // the same ms as the probe press
++	CHECK(!r.s.pb_seen);
++	r.report(1020, 402, 131);
++	CHECK(r.s.pb_seen && r.s.pb_x == 402 && r.s.pb_y == 131);
++}
++
++static void test_probe_quick_second_pull_releases_and_waits()
++{
++	Rig r(&PP);
++	r.pb_trigger(1000, true);
++	r.poll(1003); r.take_press();
++	r.report(1037, 420, 135);
++	r.poll(1043); r.take_release();
++	r.poll(1078);
++	CHECK(r.take_press() && r.s.pb_phase == 4);
++	r.pb_trigger(1100, false);
++	r.pb_trigger(1105, true);                                                // a new pull while the real press is still down at the core
++	CHECK(r.take_release() && r.s.pb_phase == 1 && r.s.pub_off);
++	r.poll(1139);
++	CHECK(!r.take_press());                                                  // the game must see the trigger up for 35 ms first
++	r.poll(1140);
++	CHECK(r.take_press() && r.s.pb_phase == 2);
++}
++
++static void test_probe_pull_during_the_measurement_is_the_same_shot()
++{
++	Rig r(&PP);
++	r.pb_trigger(1000, true);
++	r.poll(1003); r.take_press();
++	r.pb_trigger(1010, false);
++	r.pb_trigger(1020, true);
++	CHECK(r.s.pb_phase == 2 && !r.take_press() && !r.take_release());
++}
++
+ int main()
+ {
++	test_probe_dark_scene_shot();
++	test_probe_no_light_is_the_reload();
++	test_probe_light_before_the_probe_press_is_not_the_flash();
++	test_probe_quick_second_pull_releases_and_waits();
++	test_probe_pull_during_the_measurement_is_the_same_shot();
+ 	test_beacon_steady_gun_on_the_screen();
+ 	test_beacon_lights_a_dark_aim();
+ 	test_beacon_no_light_is_offscreen();
+-- 
+2.43.0
+

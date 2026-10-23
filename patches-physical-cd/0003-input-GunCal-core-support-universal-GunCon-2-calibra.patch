@@ -1,0 +1,1105 @@
+From 5f77f7e00b241cd7e45ba87585928003b90e3778 Mon Sep 17 00:00:00 2001
+From: retrorepair <joelwhybrow@googlemail.com>
+Date: Fri, 16 Oct 2026 22:28:36 +0100
+Subject: [PATCH 03/27] input: GunCal core support: universal GunCon 2
+ calibration
+
+Drives the GunCal FPGA core (cores/GunCal in the project repo) while it
+is the running core: a three-target sequence like the PS2 GunCon 2 games
+(top-left, top-right, near the bottom), the first valid reports during the
+core's flash are the measurement, and a least-squares line per axis maps
+the core's pixels to the gun's raw units. The fit is saved once for the
+gun, not per core. guncal.cpp holds the maths and sequencing and is
+unit tested on the host.
+
+Targets sit well inside the picture (GUNCAL_MARGIN percent, default 14,
+D-pad adjustable) because a CRT hides part of it; the fit only uses where
+the user really shot and reaches hidden edges by extrapolation.
+
+Hold the trigger 3 s to recalibrate. user_io_joystick_word() sends the
+core its words (joystick_3 target, joystick_4 command, joystick_5 raw gun).
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+(cherry picked from commit 54909451147eb889b1697cf450d8c3228e17e787)
+---
+ cfg.cpp              |   2 +
+ cfg.h                |   1 +
+ guncal.cpp           | 283 +++++++++++++++++++++++++++++++++++++++++
+ guncal.h             | 129 +++++++++++++++++++
+ input.cpp            | 204 +++++++++++++++++++++++++++++-
+ test/guncal_test.cpp | 291 +++++++++++++++++++++++++++++++++++++++++++
+ user_io.cpp          |  10 ++
+ user_io.h            |   1 +
+ 8 files changed, 920 insertions(+), 1 deletion(-)
+ create mode 100644 guncal.cpp
+ create mode 100644 guncal.h
+ create mode 100644 test/guncal_test.cpp
+
+diff --git a/cfg.cpp b/cfg.cpp
+index 17bcd50..6b5ae33 100644
+--- a/cfg.cpp
++++ b/cfg.cpp
+@@ -161,6 +161,7 @@ static const ini_var_t ini_vars[] =
+ 	{ "HDMI_OFF", (void*)(&(cfg.hdmi_off)), UINT16, 0, 1440 },
+ 	{ "KEYBOARD_AS_JOYSTICK", (void*)(cfg.keyboard_as_joystick), HEX32ARR, 0, 0xFFFFFFFF },
+ 	{ "LIGHTGUN_CRT_TRACKER", (void *)(&(cfg.lightgun_crt_tracker)), UINT8, 0, 1 },
++	{ "GUNCAL_MARGIN", (void *)(&(cfg.guncal_margin)), UINT8, 6, 30 },
+ 	{ "LIGHTGUN_CRT_EDGE_PCT", (void *)(&(cfg.lightgun_crt_edge_pct)), UINT8, 0, 40 },
+ 	{ "LIGHTGUN_CRT_X_VALID_MIN", (void *)(&(cfg.lightgun_crt_x_valid_min)), UINT16, 0, 200 },
+ 	{ "LIGHTGUN_CRT_SHOT_MS", (void *)(&(cfg.lightgun_crt_shot_ms)), UINT16, 0, 2000 },
+@@ -618,6 +619,7 @@ void cfg_parse()
+ 	cfg.logo = 1;
+ 	cfg.rumble = 1;
+ 	cfg.lightgun_crt_tracker = 1;
++	cfg.guncal_margin = 12;
+ 	cfg.lightgun_crt_edge_pct = 12;
+ 	cfg.lightgun_crt_x_valid_min = 16;
+ 	cfg.lightgun_crt_shot_ms = 200;
+diff --git a/cfg.h b/cfg.h
+index cfe3203..cdf71e0 100644
+--- a/cfg.h
++++ b/cfg.h
+@@ -92,6 +92,7 @@ typedef struct {
+ 	char player_controller[6][8][256];
+ 	char controller_deadzone[32][256];
+ 	uint8_t lightgun_crt_tracker;
++	uint8_t guncal_margin;
+ 	uint8_t lightgun_crt_edge_pct;
+ 	uint16_t lightgun_crt_x_valid_min;
+ 	uint16_t lightgun_crt_shot_ms;
+diff --git a/guncal.cpp b/guncal.cpp
+new file mode 100644
+index 0000000..45ef250
+--- /dev/null
++++ b/guncal.cpp
+@@ -0,0 +1,283 @@
++#include <string.h>
++#include <math.h>
++#include <stdlib.h>
++#include "guncal.h"
++
++guncal_target guncal_target_xy(int point, int margin_pct)
++{
++	int mx = GUNCAL_PX_W * margin_pct / 100;
++	int my = GUNCAL_PX_H * margin_pct / 100;
++	int l = mx, r = GUNCAL_PX_W - 1 - mx, t = my, b = GUNCAL_PX_H - 1 - my;
++	guncal_target g;
++
++	switch (point)
++	{
++	case 0:  g.x = GUNCAL_PX_W / 2; g.y = GUNCAL_PX_H / 2; break;   // centre
++	case 1:  g.x = l; g.y = t; break;                               // top left
++	case 2:  g.x = r; g.y = t; break;                               // top right
++	case 3:  g.x = r; g.y = b; break;                               // bottom right
++	default: g.x = l; g.y = b; break;                               // bottom left
++	}
++	return g;
++}
++
++// least squares: r = a * p + b
++static int fit_axis(const double *p, const double *r, int n, double *a, double *b)
++{
++	double sp = 0, sr = 0, spp = 0, spr = 0;
++	for (int i = 0; i < n; i++) { sp += p[i]; sr += r[i]; spp += p[i] * p[i]; spr += p[i] * r[i]; }
++	double den = n * spp - sp * sp;
++	if (fabs(den) < 1e-6) return 0;
++	*a = (n * spr - sp * sr) / den;
++	*b = (sr - *a * sp) / n;
++	return 1;
++}
++
++int guncal_fit_points(const int raw[][2], const guncal_target *t, int n, guncal_fit *out)
++{
++	memset(out, 0, sizeof(*out));
++	if (n < 3) return 0;
++	if (n > GUNCAL_NPOINTS) n = GUNCAL_NPOINTS;
++
++	double px[GUNCAL_NPOINTS], py[GUNCAL_NPOINTS], rx[GUNCAL_NPOINTS], ry[GUNCAL_NPOINTS];
++	for (int i = 0; i < n; i++) { px[i] = t[i].x; py[i] = t[i].y; rx[i] = raw[i][0]; ry[i] = raw[i][1]; }
++
++	if (!fit_axis(px, rx, n, &out->ax, &out->bx)) return 0;
++	if (!fit_axis(py, ry, n, &out->ay, &out->by)) return 0;
++
++	for (int i = 0; i < n; i++)
++	{
++		out->rx[i] = rx[i] - (out->ax * px[i] + out->bx);
++		out->ry[i] = ry[i] - (out->ay * py[i] + out->by);
++		if (fabs(out->rx[i]) > out->resid_x) out->resid_x = fabs(out->rx[i]);
++		if (fabs(out->ry[i]) > out->resid_y) out->resid_y = fabs(out->ry[i]);
++	}
++
++	// Sane means: raw grows with position at a plausible rate (about 1.2 raw units per pixel across, about 1 per line down)
++	// and the points sit on the line. Anything else is a missed or mis-aimed shot.
++	if (out->ax < 0.25 || out->ax > 4.0 || out->ay < 0.25 || out->ay > 4.0) return 0;
++	if (out->resid_x > 12.0 || out->resid_y > 10.0) return 0;
++	out->valid = 1;
++	return 1;
++}
++
++void guncal_raw_to_px(const guncal_fit *f, int rawx, int rawy, int *px, int *py)
++{
++	*px = (int)floor((rawx - f->bx) / f->ax + 0.5);
++	*py = (int)floor((rawy - f->by) / f->ay + 0.5);
++}
++
++void guncal_px_to_raw(const guncal_fit *f, double px, double py, double *rawx, double *rawy)
++{
++	*rawx = f->ax * px + f->bx;
++	*rawy = f->ay * py + f->by;
++}
++
++#define FILE_MAGIC 0x4C414347   // 'GCAL'
++
++void guncal_fit_to_file(const guncal_fit *f, int32_t out[GUNCAL_FILE_INTS])
++{
++	out[0] = FILE_MAGIC;
++	out[1] = (int32_t)lround(f->ax * 1000.0);
++	out[2] = (int32_t)lround(f->bx * 1000.0);
++	out[3] = (int32_t)lround(f->ay * 1000.0);
++	out[4] = (int32_t)lround(f->by * 1000.0);
++	out[5] = 1;
++}
++
++int guncal_fit_from_file(const int32_t in[GUNCAL_FILE_INTS], guncal_fit *f)
++{
++	memset(f, 0, sizeof(*f));
++	if (in[0] != FILE_MAGIC || in[5] != 1) return 0;
++	f->ax = in[1] / 1000.0; f->bx = in[2] / 1000.0;
++	f->ay = in[3] / 1000.0; f->by = in[4] / 1000.0;
++	if (f->ax < 0.25 || f->ax > 4.0 || f->ay < 0.25 || f->ay > 4.0) return 0;
++	f->valid = 1;
++	return 1;
++}
++
++int guncal_core_edges(const guncal_fit *f, const guncal_core_timing *t, int out[4])
++{
++	if (!f || !f->valid || !t || t->width < 2 || t->height < 2 || t->active_ns <= 0 || t->de_h_ns < 0) return 0;
++
++	double px_ns   = t->active_ns / t->width;                                       // time per picture pixel
++	double left_ns = t->hs_ns + t->de_h_ns;                                         // from HSync start to the first pixel
++	double p_left  = left_ns / 100.0 - GUNCAL_CAL_HS_TO_PIC_PX;                     // in GunCal pixels
++	double p_right = (left_ns + (t->width - 1) * px_ns) / 100.0 - GUNCAL_CAL_HS_TO_PIC_PX;
++
++	double y_top   = (t->vs_lines + t->de_v) - GUNCAL_CAL_VS_TO_PIC_LINES;          // in GunCal lines
++	double y_bot   = y_top + (t->height - 1);
++
++	out[0] = (int)floor(f->ay * y_top   + f->by + 0.5);
++	out[1] = (int)floor(f->ay * y_bot   + f->by + 0.5);
++	out[2] = (int)floor(f->ax * p_left  + f->bx + 0.5);
++	out[3] = (int)floor(f->ax * p_right + f->bx + 0.5);
++	return out[0] != out[1] && out[2] != out[3];
++}
++
++// ---------------------------------------------------------------- sequence
++
++static int median(int *v, int n)
++{
++	int t[GUNCAL_SAMPLES_MAX];
++	memcpy(t, v, n * sizeof(int));
++	for (int i = 1; i < n; i++)
++	{
++		int k = t[i], j = i - 1;
++		while (j >= 0 && t[j] > k) { t[j + 1] = t[j]; j--; }
++		t[j + 1] = k;
++	}
++	return t[n / 2];
++}
++
++void guncal_init(guncal_sm *s, const guncal_fit *stored, int margin_pct)
++{
++	memset(s, 0, sizeof(*s));
++	s->margin_pct = margin_pct;
++	if (stored && stored->valid)
++	{
++		s->fit = *stored;
++		s->state = GCS_MONITOR;
++	}
++	else
++	{
++		s->state = GCS_AIM;
++		s->point = 0;
++	}
++}
++
++void guncal_nudge(guncal_sm *s, int delta_pct)
++{
++	if (s->state != GCS_AIM) return;
++	int m = s->margin_pct + delta_pct;
++	if (m < 6) m = 6;
++	if (m > 30) m = 30;
++	s->margin_pct = m;
++}
++
++void guncal_accept(guncal_sm *s)
++{
++	if (s->state == GCS_VERIFY)
++	{
++		s->state = GCS_MONITOR;
++		s->msg = GUNCAL_MSG_NONE;
++	}
++}
++
++void guncal_report(guncal_sm *s, int x, int y, int trig, uint32_t now_ms)
++{
++	s->rawx = x;
++	s->rawy = y;
++
++	if (trig && !s->trig)
++	{
++		s->t_trig = now_ms;
++		s->hold_fired = 0;
++		if (s->state == GCS_AIM)
++		{
++			s->state = GCS_COLLECT;
++			s->t_press = now_ms;
++			s->n = 0;
++			s->first_valid_dt = 0;
++			s->msg = GUNCAL_MSG_NONE;
++			s->flash_seq = (s->flash_seq + 1) & 3;
++		}
++	}
++	s->trig = trig;
++
++	if (s->state == GCS_COLLECT && x >= GUNCAL_VALID_X && (uint32_t)(now_ms - s->t_press) <= GUNCAL_COLLECT_MS && s->n < GUNCAL_SAMPLES_MAX)
++	{
++		if (!s->first_valid_dt) s->first_valid_dt = (now_ms - s->t_press) ? (now_ms - s->t_press) : 1;
++		s->xs[s->n] = x;
++		s->ys[s->n] = y;
++		s->n++;
++	}
++}
++
++void guncal_tick(guncal_sm *s, uint32_t now_ms)
++{
++	if (s->state == GCS_COLLECT && (uint32_t)(now_ms - s->t_press) >= GUNCAL_COLLECT_MS)
++	{
++		s->shot_done = 1;
++		s->shot_point = s->point;
++		s->shot_n = s->n;
++
++		if (s->n >= GUNCAL_MIN_SAMPLES)
++		{
++			s->shot_ok = 1;
++			s->raw[s->point][0] = median(s->xs, s->n);
++			s->raw[s->point][1] = median(s->ys, s->n);
++			s->tpos[s->point] = guncal_target_xy(s->point, s->margin_pct);
++			s->first_dt[s->point] = (int)s->first_valid_dt;
++			s->point++;
++			s->msg = GUNCAL_MSG_NONE;
++			s->state = GCS_AIM;
++
++			if (s->point >= GUNCAL_NPOINTS)
++			{
++				guncal_fit f;
++				if (guncal_fit_points(s->raw, s->tpos, GUNCAL_NPOINTS, &f))
++				{
++					s->fit = f;
++					s->saved = 1;
++					s->state = GCS_VERIFY;
++					s->msg = GUNCAL_MSG_SAVED;
++				}
++				else
++				{
++					s->fit = f;                  // keep the numbers for the log; valid is 0
++					s->msg = GUNCAL_MSG_BAD;     // inconsistent shots: start over
++				}
++				s->point = 0;
++			}
++		}
++		else
++		{
++			s->shot_ok = 0;
++			s->msg = GUNCAL_MSG_MISSED;       // the gun saw no light during the flash: same target again
++			s->state = GCS_AIM;
++		}
++	}
++
++	if (s->trig && !s->hold_fired && (uint32_t)(now_ms - s->t_trig) >= GUNCAL_HOLD_MS && s->state != GCS_COLLECT)
++	{
++		s->hold_fired = 1;
++		s->state = GCS_AIM;
++		s->point = 0;
++		s->msg = GUNCAL_MSG_NONE;
++	}
++}
++
++uint32_t guncal_cmd_word(const guncal_sm *s)
++{
++	uint32_t page = (s->state == GCS_MONITOR) ? GUNCAL_PAGE_MONITOR : (s->state == GCS_VERIFY) ? GUNCAL_PAGE_VERIFY : GUNCAL_PAGE_CAL;
++	uint32_t w = page | ((uint32_t)(s->point & 15) << 2) | ((uint32_t)(s->flash_seq & 3) << 6) | ((uint32_t)(s->msg & 3) << 8);
++
++	if ((s->state == GCS_MONITOR || s->state == GCS_VERIFY) && s->fit.valid && s->rawx >= GUNCAL_VALID_X)
++	{
++		int px, py;
++		guncal_raw_to_px(&s->fit, s->rawx, s->rawy, &px, &py);
++		if (px >= -20 && px < GUNCAL_PX_W + 20 && py >= -20 && py < GUNCAL_PX_H + 20)
++		{
++			if (px < 0) px = 0;
++			if (px > GUNCAL_PX_W - 1) px = GUNCAL_PX_W - 1;
++			if (py < 0) py = 0;
++			if (py > GUNCAL_PX_H - 1) py = GUNCAL_PX_H - 1;
++			w |= (1u << 10) | ((uint32_t)px << 11) | ((uint32_t)py << 21);
++		}
++	}
++	return w;
++}
++
++uint32_t guncal_target_word(const guncal_sm *s)
++{
++	guncal_target t = guncal_target_xy(s->point, s->margin_pct);
++	// during the check page the ring sits in the middle of the picture
++	if (s->state == GCS_VERIFY) t = guncal_target_xy(0, s->margin_pct);
++	return (uint32_t)t.x | ((uint32_t)t.y << 10) | ((uint32_t)GUNCAL_NPOINTS << 18);
++}
++
++uint32_t guncal_raw_word(int x, int y, int trig)
++{
++	return ((uint32_t)x & 0xFFF) | (((uint32_t)y & 0xFFF) << 12) | ((uint32_t)(trig ? 1 : 0) << 24);
++}
+diff --git a/guncal.h b/guncal.h
+new file mode 100644
+index 0000000..807312f
+--- /dev/null
++++ b/guncal.h
+@@ -0,0 +1,129 @@
++#ifndef GUNCAL_H
++#define GUNCAL_H
++
++#include <stdint.h>
++
++// Universal GunCon 2 calibration, driven by the GunCal FPGA core (cores/GunCal in the project repo).
++//
++// The gun reports X as time since the line's sync pulse and Y as a line count since the frame's sync, so raw
++// X and Y are linear in the beam's position on the screen. The GunCal core draws targets at fixed positions in
++// its own pixel grid (x 0..528 at 10 MHz, y 0..239); the user shoots them in turn, the first valid reports during
++// the core's flash are the measurement, and a least-squares line per axis maps core pixels to raw gun units:
++//     raw_x = ax * px + bx        raw_y = ay * py + by
++// Five targets (centre and the four corners) give a long baseline both ways, so the aiming noise of a hand-held
++// gun averages out. After the fit the core shows a check page with a live crosshair; A or B ends it.
++// This module holds that maths and the sequencing. It has no MiSTer dependencies so it can be tested on the host.
++
++#define GUNCAL_NPOINTS      5
++#define GUNCAL_SAMPLES_MAX  64
++#define GUNCAL_COLLECT_MS   300     // valid reports in this window after a trigger pull are the measurement
++#define GUNCAL_MIN_SAMPLES  2
++#define GUNCAL_HOLD_MS      3000    // holding the trigger this long restarts (or, from the monitor page, starts) calibration
++#define GUNCAL_VALID_X      16      // raw X below this means the gun saw no light
++
++// pages and messages understood by the GunCal core
++enum { GUNCAL_PAGE_MONITOR = 0, GUNCAL_PAGE_CAL = 1, GUNCAL_PAGE_VERIFY = 2 };
++enum { GUNCAL_MSG_NONE = 0, GUNCAL_MSG_MISSED = 1, GUNCAL_MSG_SAVED = 2, GUNCAL_MSG_BAD = 3 };
++
++// The GunCal core's picture is GUNCAL_PX_W x GUNCAL_PX_H pixels (10 MHz pixel clock, 15.7 kHz). A CRT does not show all of it:
++// overscan and the bezel hide some on every set, so targets sit well inside, GUNCAL_MARGIN_DEF percent from the edges
++// (adjustable). The fit only ever uses where the user really shot, so hidden edges never matter: they are reached by
++// extrapolation along the line.
++#define GUNCAL_PX_W         529
++#define GUNCAL_PX_H         240
++#define GUNCAL_MARGIN_DEF   12
++
++struct guncal_target { int x, y; };                          // core pixel coordinates
++// Target order: centre, top-left, top-right, bottom-right, bottom-left.
++guncal_target guncal_target_xy(int point, int margin_pct);
++
++struct guncal_fit
++{
++	double ax, bx, ay, by;      // raw = a * p + b
++	double resid_x, resid_y;    // worst absolute residual over the points, raw units
++	double rx[GUNCAL_NPOINTS], ry[GUNCAL_NPOINTS];   // residual of each point
++	int    valid;
++};
++
++// Least-squares fit of n measured points. Returns 1 and fills *out (with valid set) if the result is sane.
++int  guncal_fit_points(const int raw[][2], const guncal_target *t, int n, guncal_fit *out);
++void guncal_raw_to_px(const guncal_fit *f, int rawx, int rawy, int *px, int *py);
++void guncal_px_to_raw(const guncal_fit *f, double px, double py, double *rawx, double *rawy);
++
++// Calibration file (little-endian int32s; values in thousandths).
++#define GUNCAL_FILE_INTS 6
++void guncal_fit_to_file(const guncal_fit *f, int32_t out[GUNCAL_FILE_INTS]);
++int  guncal_fit_from_file(const int32_t in[GUNCAL_FILE_INTS], guncal_fit *f);
++
++// ---- mapping the calibration onto a core ----
++//
++// The calibration is made in the GunCal core's own pixel grid. Any other core's picture sits somewhere else inside the
++// line and the frame, but MiSTer measures where (video_calc in hps_io.sv: the picture's width and duration, the time
++// from the end of HSync to the first picture pixel, the lines from the end of VSync to the first picture line). From that
++// the gun's raw value at the core's left/right/top/bottom picture edges follows: the same four numbers the old per-core
++// calibration stored (the core scales its analog gun axes across its picture).
++//
++// The sync pulse widths are not measured by the framework, so they are supplied (a per-core table, with defaults).
++struct guncal_core_timing
++{
++	double hs_ns;               // width of the core's HSync pulse
++	int    vs_lines;            // width of the core's VSync in lines
++	double de_h_ns;             // end of HSync to the first picture pixel (measured)
++	int    de_v;                // end of VSync to the first picture line, in lines (measured)
++	double active_ns;           // duration of the picture part of a line (measured)
++	int    width, height;       // picture pixels per line, lines per frame (measured)
++};
++
++// Where the GunCal core puts things relative to its sync pulses: the picture starts 94 pixels (of 100 ns) after HSync
++// starts and 17 lines after VSync starts (NTSC timing, 262 lines).
++#define GUNCAL_CAL_HS_TO_PIC_PX     94
++#define GUNCAL_CAL_VS_TO_PIC_LINES  17
++
++// out = { y_top, y_bottom, x_left, x_right }: the raw gun values at the picture's edges (the order of guncal[] in MiSTer).
++// Returns 0 if the timing or the fit is unusable.
++int guncal_core_edges(const guncal_fit *f, const guncal_core_timing *t, int out[4]);
++
++// ---- the sequence ----
++
++enum { GCS_MONITOR = 0, GCS_AIM, GCS_COLLECT, GCS_VERIFY };
++
++struct guncal_sm
++{
++	int      state;
++	int      point;                              // target being aimed at
++	uint32_t t_press;                            // trigger pull that opened the collection window
++	int      n;                                  // samples collected
++	int      xs[GUNCAL_SAMPLES_MAX], ys[GUNCAL_SAMPLES_MAX];
++	int      raw[GUNCAL_NPOINTS][2];
++	guncal_target tpos[GUNCAL_NPOINTS];          // where each point's target really was when it was shot (the margin can change)
++	int      first_dt[GUNCAL_NPOINTS];           // ms from the pull to the first valid report, per point
++	int      rawx, rawy;                         // latest report
++	int      trig;
++	uint32_t t_trig;                             // when the trigger went down
++	int      hold_fired;
++	int      flash_seq;
++	int      margin_pct;                         // target inset, percent of the picture
++	int      msg;
++	uint32_t first_valid_dt;                     // ms from the pull to the first valid report (0 = none yet)
++	guncal_fit fit;
++	int      saved;                              // a new fit is ready for the caller to store
++	int      shot_done;                          // a shot just finished: shot_point/shot_n/shot_ok describe it (caller clears)
++	int      shot_point, shot_n, shot_ok;
++};
++
++void guncal_init(guncal_sm *s, const guncal_fit *stored, int margin_pct);   // stored may be NULL
++void guncal_nudge(guncal_sm *s, int delta_pct);                                // move the targets in or out (gun D-pad)
++void guncal_report(guncal_sm *s, int x, int y, int trig, uint32_t now_ms);   // one raw gun report
++void guncal_tick(guncal_sm *s, uint32_t now_ms);                              // call regularly
++void guncal_accept(guncal_sm *s);                                              // A or B on the check page: finish
++uint32_t guncal_cmd_word(const guncal_sm *s);
++
++// Words sent to the core:
++//   joystick_4 (guncal_cmd_word): [1:0] page  [5:2] target  [7:6] flash sequence  [9:8] message  [10] pointer valid
++//                                 [20:11] pointer x (core px)  [28:21] pointer y (core px)
++//   joystick_3 (guncal_target_word): [9:0] target x  [17:10] target y  [21:18] number of targets   (core px)
++//   joystick_5 (guncal_raw_word): [11:0] X  [23:12] Y  [24] trigger   (the gun's raw report)
++uint32_t guncal_target_word(const guncal_sm *s);
++uint32_t guncal_raw_word(int x, int y, int trig);
++
++#endif
+diff --git a/input.cpp b/input.cpp
+index 68140c5..493169a 100644
+--- a/input.cpp
++++ b/input.cpp
+@@ -30,6 +30,7 @@
+ #include "audio.h"
+ #include "joymapping.h"
+ #include "lightgun_crt.h"
++#include "guncal.h"
+ #include "support.h"
+ #include "support/physical_disc/physical_disc.h"
+ #include "profiling.h"
+@@ -1483,6 +1484,10 @@ typedef struct
+ 	uint8_t  kbdmap[256];
+ 
+ 	int32_t  guncal[4];
++	int      guncal_file;                        // guncal[] came from a per-core calibration file
++	guncal_fit uni;                              // the gun's universal calibration (GunCal core), if any
++	int      uni_valid;
++	uint32_t uni_sig;                            // video timing the derived guncal[] was computed for
+ 
+ 	int      accx, accy;
+ 	int      startx, starty;
+@@ -1915,6 +1920,7 @@ void input_lightgun_save(int idx, int32_t *cal)
+ 	sprintf(name, "%s_gun_cal_%04x_%04x_v2.cfg", user_io_get_core_name(), input[idx].vid, input[idx].pid);
+ 	FileSaveConfig(name, cal, 4 * sizeof(int32_t));
+ 	memcpy(input[idx].guncal, cal, sizeof(input[idx].guncal));
++	input[idx].guncal_file = 1;
+ }
+ 
+ static void input_lightgun_load(int idx)
+@@ -1923,13 +1929,26 @@ static void input_lightgun_load(int idx)
+ 	int32_t defaults[4];
+ 	memcpy(defaults, input[idx].guncal, sizeof(defaults));
+ 	sprintf(name, "%s_gun_cal_%04x_%04x_v2.cfg", user_io_get_core_name(), input[idx].vid, input[idx].pid);
+-	FileLoadConfig(name, input[idx].guncal, 4 * sizeof(int32_t));
++	input[idx].guncal_file = FileLoadConfig(name, input[idx].guncal, 4 * sizeof(int32_t)) ? 1 : 0;
+ 
+ 	// A saved range of zero width cannot be scaled; use the device defaults instead.
+ 	if (input[idx].guncal[0] == input[idx].guncal[1] || input[idx].guncal[2] == input[idx].guncal[3])
+ 	{
+ 		printf("Ignoring degenerate lightgun calibration in %s\n", name);
+ 		memcpy(input[idx].guncal, defaults, sizeof(defaults));
++		input[idx].guncal_file = 0;
++	}
++
++	// The GunCon 2 also has a universal calibration, made once with the GunCal core; it is used for every core that has no
++	// calibration file of its own (see guncal_apply_universal).
++	input[idx].uni_valid = 0;
++	input[idx].uni_sig = 0;
++	if (input[idx].quirk == QUIRK_LIGHTGUN_CRT)
++	{
++		char uname[64];
++		int32_t v[GUNCAL_FILE_INTS] = {};
++		snprintf(uname, sizeof(uname), "GUNCAL_uni_%04x_%04x_v1.cfg", input[idx].vid, input[idx].pid);
++		input[idx].uni_valid = FileLoadConfig(uname, v, sizeof(v)) && guncal_fit_from_file(v, &input[idx].uni);
+ 	}
+ }
+ 
+@@ -2084,8 +2103,60 @@ static void gundbg_log_out(int dev, const crtgun_state *st, uint32_t t_ms)
+ 
+ static crtgun_state crtgun[NUMDEV];
+ 
++// Derive the running core's picture edges (the four numbers a per-core calibration would store) from the gun's
++// universal calibration and the core's measured video timing. See guncal.h. Recomputed when the timing changes.
++static void guncal_apply_universal(int i)
++{
++	if (!input[i].uni_valid || input[i].guncal_file) return;
++
++	const char *core = user_io_get_core_name();
++	if (!strcmp(core, "GUNCAL")) return;
++
++	const VideoInfo *v = &current_video_info;
++	if (!v->width || !v->height || !v->htime || !v->ptime || !v->vtime || !v->frame_clocks || v->interlaced) return;
++
++	guncal_core_timing t;
++	double clk_vid_ns = (double)v->vtime * 10.0 / (double)v->frame_clocks;    // the framework counts in clk_vid cycles and 10 ns ticks
++	t.de_h_ns   = v->de_h * clk_vid_ns;
++	t.de_v      = v->de_v;
++	t.active_ns = v->ptime * 10.0;
++	t.width     = v->width;
++	t.height    = v->height;
++
++	// The framework does not measure the sync pulse widths: the usual 15 kHz values unless the core is known. MiSTer reports
++	// an arcade core by its MRA set name or, early in the load, by the core's own name.
++	t.hs_ns = 4700.0;
++	t.vs_lines = 3;
++	if (!strncasecmp(core, "ptblank", 7) || !strncasecmp(core, "gunbulet", 8) || !strcasecmp(core, "NB1")) t.hs_ns = 32 * 165.3;   // NB-1 core: 32 px at 6.048 MHz
++	else if (!strcasecmp(core, "NES")) t.hs_ns = 4650.0;                                                                           // 25 dots at 5.37 MHz
++
++	// recompute when the measured timing or the assumed pulse width changes (the core name can change while a core starts)
++	uint32_t sig = v->width * 31u + v->height * 17u + v->htime * 13u + v->ptime * 7u + v->de_h * 5u + v->de_v * 3u + v->frame_clocks + (uint32_t)t.hs_ns * 11u;
++	if (sig == input[i].uni_sig) return;
++	input[i].uni_sig = sig;
++
++	int e[4];
++	if (guncal_core_edges(&input[i].uni, &t, e))
++	{
++		input[i].guncal[0] = e[0];
++		input[i].guncal[1] = e[1];
++		input[i].guncal[2] = e[2];
++		input[i].guncal[3] = e[3];
++		printf("GunCal: %s picture %dx%d, edges from the universal calibration: x %d..%d, y %d..%d\n", core, t.width, t.height, e[2], e[3], e[0], e[1]);
++
++		FILE *lf = fopen("/tmp/guncal_apply.log", "a");
++		if (lf)
++		{
++			fprintf(lf, "%s: picture %dx%d active %.0f ns, hs %.0f ns, de_h %.0f ns, de_v %d -> raw x %d..%d, y %d..%d\n",
++				core, t.width, t.height, t.active_ns, t.hs_ns, t.de_h_ns, t.de_v, e[2], e[3], e[0], e[1]);
++			fclose(lf);
++		}
++	}
++}
++
+ static void crtgun_get_params(int i, crtgun_params *p)
+ {
++	guncal_apply_universal(i);
+ 	p->xmin = input[i].guncal[2];
+ 	p->xmax = input[i].guncal[3];
+ 	p->ymin = input[i].guncal[0];
+@@ -2123,6 +2194,134 @@ static void crtgun_feed(int i, const struct input_event *ev)
+ #endif
+ }
+ 
++// ---- GunCal core support (cores/GunCal in the project repo; sequence and maths in guncal.cpp) ----
++// Active only while the GunCal core is running. The core draws; this drives it through joystick_3/4/5.
++
++static guncal_sm gcal;
++static bool      gcal_on = false;
++static int       gcal_dev = -1;
++static uint32_t  gcal_sent[3] = {};
++static uint32_t  gcal_refresh = 0;
++static int       gcal_x = 0, gcal_y = 0, gcal_trig = 0;
++
++static uint32_t guncal_now_ms()
++{
++	struct timespec ts;
++	clock_gettime(CLOCK_REALTIME, &ts);
++	return (uint32_t)ts.tv_sec * 1000u + (uint32_t)(ts.tv_nsec / 1000000);
++}
++
++static void guncal_file_name(int dev, char *name, size_t n)
++{
++	snprintf(name, n, "GUNCAL_uni_%04x_%04x_v1.cfg", input[dev].vid, input[dev].pid);
++}
++
++static void guncal_send(bool force)
++{
++	uint32_t w[3] = { guncal_target_word(&gcal), guncal_cmd_word(&gcal), guncal_raw_word(gcal_x, gcal_y, gcal_trig) };
++	for (int k = 0; k < 3; k++)
++	{
++		if (force || w[k] != gcal_sent[k])
++		{
++			user_io_joystick_word(3 + k, w[k]);
++			gcal_sent[k] = w[k];
++		}
++	}
++}
++
++// ev is one raw event of the GunCon 2, or NULL for the regular call from input_poll().
++static void guncal_service(const struct input_event *ev)
++{
++	if (strcmp(user_io_get_core_name(), "GUNCAL"))
++	{
++		gcal_on = false;
++		return;
++	}
++
++	uint32_t now = guncal_now_ms();
++
++	if (!gcal_on)
++	{
++		int d = -1;
++		for (int i = 0; i < NUMDEV; i++) if (input[i].quirk == QUIRK_LIGHTGUN_CRT) d = i;
++		if (d < 0) return;                          // no GunCon 2 (yet)
++
++		gcal_dev = d;
++		char name[64];
++		int32_t v[GUNCAL_FILE_INTS] = {};
++		guncal_fit f;
++		memset(&f, 0, sizeof(f));
++		guncal_file_name(d, name, sizeof(name));
++		int have = FileLoadConfig(name, v, sizeof(v)) && guncal_fit_from_file(v, &f);
++		guncal_init(&gcal, have ? &f : NULL, cfg.guncal_margin);
++		gcal_x = gcal_y = gcal_trig = 0;
++		gcal_on = true;
++		printf("GunCal: %s\n", have ? "loaded the saved calibration" : "no saved calibration, starting the sequence");
++		guncal_send(true);
++		gcal_refresh = now + 500;
++	}
++
++	if (ev)
++	{
++		if (ev->type == EV_ABS && ev->code == ABS_X) gcal_x = ev->value;
++		else if (ev->type == EV_ABS && ev->code == ABS_Y) gcal_y = ev->value;
++		else if (ev->type == EV_KEY && ev->code == GUNCON2_TRIGGER_CODE) gcal_trig = ev->value ? 1 : 0;
++		else if (ev->type == EV_ABS && ev->code == ABS_HAT0Y && ev->value) guncal_nudge(&gcal, ev->value < 0 ? 2 : -2);   // D-pad up: targets in, down: out
++		else if (ev->type == EV_KEY && (ev->code == 0x130 || ev->code == 0x131) && ev->value == 1) guncal_accept(&gcal);  // A or B: end the check page
++		else return;
++
++		now = (uint32_t)ev->time.tv_sec * 1000u + (uint32_t)ev->time.tv_usec / 1000u;
++		guncal_report(&gcal, gcal_x, gcal_y, gcal_trig, now);
++	}
++
++	guncal_tick(&gcal, ev ? guncal_now_ms() : now);
++
++	// Everything the calibration measures goes to a log in /config (appended), so it can be analysed afterwards.
++	char logpath[300];
++	snprintf(logpath, sizeof(logpath), "%s/config/GUNCAL_log.txt", getRootDir());
++
++	if (gcal.shot_done)
++	{
++		gcal.shot_done = 0;
++		printf("GunCal: shot at target %d: %d valid reports, first %d ms after the pull, %s\n",
++			gcal.shot_point, gcal.shot_n, gcal.shot_ok ? gcal.first_dt[gcal.shot_point] : 0, gcal.shot_ok ? "ok" : "missed");
++	}
++
++	bool bad = (gcal.msg == GUNCAL_MSG_BAD && gcal.state == GCS_AIM && gcal.point == 0 && gcal.raw[GUNCAL_NPOINTS - 1][0]);
++	static bool bad_logged = false;
++	if (gcal.saved || (bad && !bad_logged))
++	{
++		FILE *lf = fopen(logpath, "a");
++		if (lf)
++		{
++			fprintf(lf, "# GunCal %s margin %d%%: raw_x = %.4f*px + %.2f, raw_y = %.4f*py + %.2f, worst residual %.1f / %.1f\n",
++				gcal.saved ? "calibration" : "REJECTED calibration", gcal.margin_pct, gcal.fit.ax, gcal.fit.bx, gcal.fit.ay, gcal.fit.by, gcal.fit.resid_x, gcal.fit.resid_y);
++			for (int i = 0; i < GUNCAL_NPOINTS; i++)
++				fprintf(lf, "point %d: target px (%d,%d) raw (%d,%d) residual (%.1f,%.1f) first valid %d ms\n", i,
++					gcal.tpos[i].x, gcal.tpos[i].y, gcal.raw[i][0], gcal.raw[i][1], gcal.fit.rx[i], gcal.fit.ry[i], gcal.first_dt[i]);
++			fclose(lf);
++		}
++		bad_logged = !gcal.saved;
++	}
++	if (gcal.state == GCS_AIM && gcal.point > 0) bad_logged = false;
++
++	if (gcal.saved)
++	{
++		gcal.saved = 0;
++		char name[64];
++		int32_t v[GUNCAL_FILE_INTS];
++		guncal_file_name(gcal_dev, name, sizeof(name));
++		guncal_fit_to_file(&gcal.fit, v);
++		FileSaveConfig(name, v, sizeof(v));
++		printf("GunCal: calibration saved to %s: raw_x = %.4f * px + %.1f, raw_y = %.4f * py + %.1f (worst residual %.1f / %.1f)\n",
++			name, gcal.fit.ax, gcal.fit.bx, gcal.fit.ay, gcal.fit.by, gcal.fit.resid_x, gcal.fit.resid_y);
++	}
++
++	bool refresh = (int32_t)(now - gcal_refresh) >= 0;
++	if (refresh) gcal_refresh = now + 500;
++	guncal_send(refresh);
++}
++
+ static unsigned char mouse_btn = 0; //emulated mouse
+ static unsigned char mice_btn = 0;
+ static int mouse_req = 0;
+@@ -5756,6 +5955,7 @@ int input_test(int getchar)
+ #ifdef GUNDBG
+ 							if (input[i].quirk == QUIRK_LIGHTGUN_CRT) gundbg_log(&ev);
+ #endif
++							if (input[i].quirk == QUIRK_LIGHTGUN_CRT) guncal_service(&ev);
+ 							if (input[i].quirk == QUIRK_LIGHTGUN_CRT && cfg.lightgun_crt_tracker) crtgun_feed(i, &ev);
+ 							if (getchar)
+ 							{
+@@ -6122,6 +6322,7 @@ int input_test(int getchar)
+ 
+ 								if (ev.type == EV_ABS && input[i].quirk == QUIRK_LIGHTGUN_CRT)
+ 								{
++									guncal_apply_universal(i);
+ 									// The gun reports junk (X = 0 or 1, a stale Y) while it sees no light; keep that out of the calibration menu.
+ 									if (!cfg.lightgun_crt_tracker || crtgun[i].raw_x >= (int32_t)cfg.lightgun_crt_x_valid_min)
+ 										menu_lightgun_cb(i, ev.type, ev.code, ev.value);
+@@ -6475,6 +6676,7 @@ void key_update_frames_held_cb(void)
+ 
+ int input_poll(int getchar)
+ {
++	guncal_service(NULL);
+ 	#ifdef PROFILING
+ 		PROFILE_FUNCTION();
+ 	#endif
+diff --git a/test/guncal_test.cpp b/test/guncal_test.cpp
+new file mode 100644
+index 0000000..32c7f1c
+--- /dev/null
++++ b/test/guncal_test.cpp
+@@ -0,0 +1,291 @@
++// Host-side tests for guncal:
++//   g++ -std=gnu++14 -Wall -Wextra -I. test/guncal_test.cpp guncal.cpp -o /tmp/gctest && /tmp/gctest
++#include <stdio.h>
++#include <stdlib.h>
++#include <math.h>
++#include <string.h>
++#include "guncal.h"
++
++static int failures = 0;
++#define CHECK(cond) do { if (!(cond)) { printf("FAIL line %d: %s\n", __LINE__, #cond); failures++; } } while (0)
++
++// a pretend display: raw = a * px + b (what the real gun should do)
++static const double AX = 1.19, BX = 112.0, AY = 0.97, BY = 18.0;
++static int rawx_of(double px) { return (int)floor(AX * px + BX + 0.5); }
++static int rawy_of(double py) { return (int)floor(AY * py + BY + 0.5); }
++
++static void test_fit_recovers_the_line()
++{
++	guncal_target t[GUNCAL_NPOINTS];
++	int raw[GUNCAL_NPOINTS][2];
++	for (int i = 0; i < GUNCAL_NPOINTS; i++) { t[i] = guncal_target_xy(i, 12); raw[i][0] = rawx_of(t[i].x); raw[i][1] = rawy_of(t[i].y); }
++	guncal_fit f;
++	CHECK(guncal_fit_points(raw, t, GUNCAL_NPOINTS, &f));
++	CHECK(fabs(f.ax - AX) < 0.01 && fabs(f.bx - BX) < 2.0);
++	CHECK(fabs(f.ay - AY) < 0.01 && fabs(f.by - BY) < 2.0);
++	// the corners and edges of the picture, including parts a TV would hide, come out right by extrapolation
++	int px, py;
++	guncal_raw_to_px(&f, rawx_of(0), rawy_of(0), &px, &py);
++	CHECK(abs(px - 0) <= 2 && abs(py - 0) <= 2);
++	guncal_raw_to_px(&f, rawx_of(528), rawy_of(239), &px, &py);
++	CHECK(abs(px - 528) <= 2 && abs(py - 239) <= 2);
++}
++
++static void test_fit_rejects_bad_shots()
++{
++	guncal_target t[GUNCAL_NPOINTS];
++	int good[GUNCAL_NPOINTS][2];
++	for (int i = 0; i < GUNCAL_NPOINTS; i++) { t[i] = guncal_target_xy(i, 12); good[i][0] = rawx_of(t[i].x); good[i][1] = rawy_of(t[i].y); }
++	guncal_fit f;
++	int swapped[GUNCAL_NPOINTS][2];
++	for (int i = 0; i < GUNCAL_NPOINTS; i++) { swapped[i][0] = good[i][0]; swapped[i][1] = good[i][1]; }
++	swapped[1][0] = good[2][0]; swapped[2][0] = good[1][0];     // two shots in the wrong order
++	CHECK(!guncal_fit_points(swapped, t, GUNCAL_NPOINTS, &f));
++	int noise[GUNCAL_NPOINTS][2] = { { 300, 50 }, { 700, 60 }, { 100, 200 }, { 400, 20 }, { 250, 250 } };  // a gun with no sync
++	CHECK(!guncal_fit_points(noise, t, GUNCAL_NPOINTS, &f));
++	int same[GUNCAL_NPOINTS][2] = { { 400, 100 }, { 400, 100 }, { 400, 100 }, { 400, 100 }, { 400, 100 } };
++	CHECK(!guncal_fit_points(same, t, GUNCAL_NPOINTS, &f));
++	int oneoff[GUNCAL_NPOINTS][2];
++	for (int i = 0; i < GUNCAL_NPOINTS; i++) { oneoff[i][0] = good[i][0]; oneoff[i][1] = good[i][1]; }
++	oneoff[3][1] += 40;                                           // one wild shot among five
++	CHECK(!guncal_fit_points(oneoff, t, GUNCAL_NPOINTS, &f));
++}
++
++// hand-aimed shots are off by a couple of lines; five spread targets must beat two vertical levels
++static void test_five_points_beat_three_under_aim_noise()
++{
++	srand(7);
++	double e5 = 0, e3 = 0;
++	int trials = 400;
++	guncal_target t[GUNCAL_NPOINTS];
++	for (int i = 0; i < GUNCAL_NPOINTS; i++) t[i] = guncal_target_xy(i, 12);
++	for (int k = 0; k < trials; k++)
++	{
++		int raw[GUNCAL_NPOINTS][2];
++		for (int i = 0; i < GUNCAL_NPOINTS; i++)
++		{
++			double nx = ((rand() % 7) - 3) * 1.0, ny = ((rand() % 7) - 3) * 1.0;     // +-3 units of aiming noise
++			raw[i][0] = rawx_of(t[i].x) + (int)nx;
++			raw[i][1] = rawy_of(t[i].y) + (int)ny;
++		}
++		guncal_fit f5, f3;
++		if (guncal_fit_points(raw, t, GUNCAL_NPOINTS, &f5)) e5 += (f5.ay - AY) * (f5.ay - AY); else e5 += 1;
++		// the old three-target layout: top-left, top-right, near the bottom
++		guncal_target t3[3] = { t[1], t[2], { 300, 207 } };
++		int raw3[3][2] = { { raw[1][0], raw[1][1] }, { raw[2][0], raw[2][1] }, { rawx_of(300) + (int)((rand() % 7) - 3), rawy_of(207) + (int)((rand() % 7) - 3) } };
++		if (guncal_fit_points(raw3, t3, 3, &f3)) e3 += (f3.ay - AY) * (f3.ay - AY); else e3 += 1;
++	}
++	double rms5 = sqrt(e5 / trials), rms3 = sqrt(e3 / trials);
++	printf("  vertical slope error under +-3 aiming noise: 5 points rms %.4f, 3 points rms %.4f\n", rms5, rms3);
++	CHECK(rms5 < 0.02);
++	CHECK(rms5 < rms3);
++}
++
++static void test_file_roundtrip()
++{
++	guncal_fit f, g;
++	memset(&f, 0, sizeof(f));
++	f.ax = 1.1912; f.bx = 112.25; f.ay = 0.9734; f.by = 17.5; f.valid = 1;
++	int32_t buf[GUNCAL_FILE_INTS];
++	guncal_fit_to_file(&f, buf);
++	CHECK(guncal_fit_from_file(buf, &g));
++	CHECK(fabs(g.ax - f.ax) < 0.001 && fabs(g.bx - f.bx) < 0.001 && fabs(g.ay - f.ay) < 0.001 && fabs(g.by - f.by) < 0.001);
++	buf[0] = 0;
++	CHECK(!guncal_fit_from_file(buf, &g));
++}
++
++// plays the user: shoot the current target with a gun that obeys raw = a*px + b
++static void shoot(guncal_sm *s, uint32_t *t, int with_light)
++{
++	guncal_target tg = guncal_target_xy(s->point, s->margin_pct);
++	int x = with_light ? rawx_of(tg.x) : 0, y = with_light ? rawy_of(tg.y) : 5;
++	guncal_report(s, x, y, 0, *t); *t += 20;
++	guncal_report(s, x, y, 1, *t); *t += 20;           // pull
++	for (int i = 0; i < 6; i++) { guncal_report(s, x + (i & 1), y, 1, *t); *t += 20; }
++	guncal_report(s, x, y, 0, *t); *t += 20;           // release
++	*t += 400;                                         // past the collection window
++	guncal_tick(s, *t);
++}
++
++static void test_full_sequence()
++{
++	guncal_sm s;
++	guncal_init(&s, NULL, 12);
++	CHECK(s.state == GCS_AIM && s.point == 0);
++	CHECK((guncal_cmd_word(&s) & 3) == GUNCAL_PAGE_CAL);
++	CHECK(((guncal_target_word(&s) >> 18) & 15) == GUNCAL_NPOINTS);
++	uint32_t t = 1000;
++	for (int k = 0; k < GUNCAL_NPOINTS - 1; k++) { shoot(&s, &t, 1); CHECK(s.point == k + 1 && s.state == GCS_AIM); }
++	shoot(&s, &t, 1);
++	CHECK(s.state == GCS_VERIFY && s.fit.valid && s.saved);
++	CHECK((guncal_cmd_word(&s) & 3) == GUNCAL_PAGE_VERIFY);
++	CHECK(((guncal_cmd_word(&s) >> 8) & 3) == GUNCAL_MSG_SAVED);
++	CHECK(fabs(s.fit.ax - AX) < 0.02 && fabs(s.fit.ay - AY) < 0.02);
++	guncal_target ctr = guncal_target_xy(0, 12);
++	CHECK((guncal_target_word(&s) & 0x3FF) == (uint32_t)ctr.x);         // the check page ring is at the centre
++
++	// check page: the pointer is where the gun is
++	guncal_target tg = { 300, 120 };
++	guncal_report(&s, rawx_of(tg.x), rawy_of(tg.y), 0, t);
++	uint32_t w = guncal_cmd_word(&s);
++	CHECK((w >> 10) & 1);
++	CHECK(abs((int)((w >> 11) & 0x3FF) - tg.x) <= 2 && abs((int)((w >> 21) & 0xFF) - tg.y) <= 2);
++	guncal_report(&s, 0, 5, 0, t + 20);                // no light: no pointer
++	CHECK(!((guncal_cmd_word(&s) >> 10) & 1));
++
++	guncal_accept(&s);                                 // A or B
++	CHECK(s.state == GCS_MONITOR && (guncal_cmd_word(&s) & 3) == GUNCAL_PAGE_MONITOR);
++}
++
++static void test_missed_shot_repeats_the_point()
++{
++	guncal_sm s;
++	guncal_init(&s, NULL, 12);
++	uint32_t t = 1000;
++	shoot(&s, &t, 0);
++	CHECK(s.point == 0 && s.state == GCS_AIM && s.msg == GUNCAL_MSG_MISSED && s.shot_done && !s.shot_ok);
++	shoot(&s, &t, 1);
++	CHECK(s.point == 1 && s.msg == GUNCAL_MSG_NONE && s.shot_ok);
++}
++
++static void test_hold_trigger_restarts()
++{
++	guncal_fit f;
++	memset(&f, 0, sizeof(f));
++	f.ax = AX; f.bx = BX; f.ay = AY; f.by = BY; f.valid = 1;
++	guncal_sm s;
++	guncal_init(&s, &f, 12);
++	CHECK(s.state == GCS_MONITOR);
++	guncal_report(&s, 400, 100, 1, 1000);
++	guncal_tick(&s, 1000 + GUNCAL_HOLD_MS - 1);
++	CHECK(s.state == GCS_MONITOR);
++	guncal_tick(&s, 1000 + GUNCAL_HOLD_MS);
++	CHECK(s.state == GCS_AIM && s.point == 0);
++
++	// from the check page too, and shooting there (testing the aim) must not restart it
++	guncal_sm v;
++	guncal_init(&v, NULL, 12);
++	uint32_t t = 1000;
++	for (int k = 0; k < GUNCAL_NPOINTS; k++) shoot(&v, &t, 1);
++	CHECK(v.state == GCS_VERIFY);
++	guncal_report(&v, 400, 100, 1, t);
++	guncal_report(&v, 400, 100, 0, t + 100);
++	guncal_tick(&v, t + 200);
++	CHECK(v.state == GCS_VERIFY);
++	guncal_report(&v, 400, 100, 1, t + 1000);
++	guncal_tick(&v, t + 1000 + GUNCAL_HOLD_MS);
++	CHECK(v.state == GCS_AIM && v.point == 0);
++}
++
++static void test_margin_change_midway_still_fits()
++{
++	guncal_sm s;
++	guncal_init(&s, NULL, 12);
++	uint32_t t = 1000;
++	shoot(&s, &t, 1);
++	guncal_nudge(&s, 6);                               // targets move inward because the TV hides the corners
++	CHECK(s.margin_pct == 18);
++	shoot(&s, &t, 1);
++	guncal_nudge(&s, -4);
++	shoot(&s, &t, 1);
++	shoot(&s, &t, 1);
++	shoot(&s, &t, 1);
++	CHECK(s.state == GCS_VERIFY && s.fit.valid);
++	CHECK(fabs(s.fit.ax - AX) < 0.02 && fabs(s.fit.ay - AY) < 0.02);
++	guncal_sm n;
++	guncal_init(&n, NULL, 12);
++	guncal_nudge(&n, -100);
++	CHECK(n.margin_pct == 6);
++	guncal_nudge(&n, 100);
++	CHECK(n.margin_pct == 30);
++}
++
++static void test_noise_samples_use_median()
++{
++	guncal_sm s;
++	guncal_init(&s, NULL, 12);
++	guncal_target tg = guncal_target_xy(0, 12);
++	int x = rawx_of(tg.x), y = rawy_of(tg.y);
++	guncal_report(&s, x, y, 1, 1000);
++	guncal_report(&s, 900, 10, 1, 1020);               // one wild reading
++	guncal_report(&s, x + 1, y, 1, 1040);
++	guncal_report(&s, x, y + 1, 1, 1060);
++	guncal_report(&s, x - 1, y, 1, 1080);
++	guncal_tick(&s, 1000 + GUNCAL_COLLECT_MS);
++	CHECK(s.point == 1 && abs(s.raw[0][0] - x) <= 1 && abs(s.raw[0][1] - y) <= 1);
++}
++
++static guncal_fit make_fit()
++{
++	guncal_fit f;
++	memset(&f, 0, sizeof(f));
++	f.ax = AX; f.bx = BX; f.ay = AY; f.by = BY; f.valid = 1;
++	return f;
++}
++
++// the GunCal core describing itself must come out as its own pixel grid: x 0..528, y 0..239
++static void test_edges_for_the_calibration_core_itself()
++{
++	guncal_fit f = make_fit();
++	guncal_core_timing t;
++	t.hs_ns = 4600; t.vs_lines = 3;                 // GunCal: HSync 46 px, VSync 3 lines
++	t.de_h_ns = (638 - 590) * 100.0;                // HSync ends at pixel 590 of 638: 48 px to the picture
++	t.de_v = 262 - 248;                             // VSync ends at line 248 of 262
++	t.active_ns = 529 * 100.0; t.width = 529; t.height = 240;
++	int e[4];
++	CHECK(guncal_core_edges(&f, &t, e));
++	CHECK(abs(e[2] - rawx_of(0)) <= 1 && abs(e[3] - rawx_of(528)) <= 1);
++	CHECK(abs(e[0] - rawy_of(0)) <= 1 && abs(e[1] - rawy_of(239)) <= 1);
++}
++
++// the NB-1 core (Point Blank): 384 px at 6.048 MHz, picture 288 x 224, HSync 32 px starting 74 px before the picture,
++// VSync 3 lines starting 33 lines before it
++static void test_edges_for_the_nb1_core()
++{
++	guncal_fit f = make_fit();
++	double px = 1e9 / 6.048e6;                      // 165.3 ns
++	guncal_core_timing t;
++	t.hs_ns = 32 * px; t.vs_lines = 3;
++	t.de_h_ns = (74 - 32) * px;
++	t.de_v = 33 - 3;
++	t.active_ns = 288 * px; t.width = 288; t.height = 224;
++	int e[4];
++	CHECK(guncal_core_edges(&f, &t, e));
++	// picture left edge = 74 px * 165.3 ns = 12.23 us after HSync starts = GunCal pixel 28.3; right edge at 502.8
++	CHECK(abs(e[2] - rawx_of(28.3)) <= 1);
++	CHECK(abs(e[3] - rawx_of(502.8)) <= 1);
++	CHECK(abs(e[0] - rawy_of(16)) <= 1);            // 33 lines after VSync start vs GunCal's 17
++	CHECK(abs(e[1] - rawy_of(16 + 223)) <= 1);
++	CHECK(e[2] < e[3] && e[0] < e[1]);
++}
++
++static void test_edges_reject_nonsense()
++{
++	guncal_fit f = make_fit();
++	guncal_core_timing t;
++	memset(&t, 0, sizeof(t));
++	int e[4];
++	CHECK(!guncal_core_edges(&f, &t, e));
++	f.valid = 0;
++	t.width = 256; t.height = 240; t.active_ns = 47000; t.de_h_ns = 5000; t.hs_ns = 4700; t.vs_lines = 3; t.de_v = 14;
++	CHECK(!guncal_core_edges(&f, &t, e));
++}
++
++int main()
++{
++	test_fit_recovers_the_line();
++	test_fit_rejects_bad_shots();
++	test_five_points_beat_three_under_aim_noise();
++	test_file_roundtrip();
++	test_full_sequence();
++	test_missed_shot_repeats_the_point();
++	test_hold_trigger_restarts();
++	test_margin_change_midway_still_fits();
++	test_noise_samples_use_median();
++	test_edges_for_the_calibration_core_itself();
++	test_edges_for_the_nb1_core();
++	test_edges_reject_nonsense();
++	if (failures) { printf("%d check(s) failed\n", failures); return 1; }
++	printf("all guncal tests passed\n");
++	return 0;
++}
+diff --git a/user_io.cpp b/user_io.cpp
+index 294061f..1b6ed19 100644
+--- a/user_io.cpp
++++ b/user_io.cpp
+@@ -1817,6 +1817,16 @@ void user_io_digital_joystick(unsigned char joystick, uint32_t map, int newdir)
+ 	register_activity();
+ }
+ 
++// Send one raw 32-bit word to the core as joystick_<idx> (2..5), both halves, always. Used to drive the GunCal core.
++void user_io_joystick_word(int idx, uint32_t v)
++{
++	if (idx < 2 || idx > 5) return;
++	spi_uio_cmd_cont(UIO_JOYSTICK2 + idx - 2);
++	spi_w(v);
++	spi_w(v >> 16);
++	DisableIO();
++}
++
+ static uint8_t CSD[16] = { 0xf1, 0x40, 0x40, 0x0a, 0x80, 0x7f, 0xe5, 0xe9, 0x00, 0x00, 0x59, 0x5b, 0x32, 0x00, 0x0e, 0x40 };
+ static uint8_t CID[16] = { 0x3e, 0x00, 0x00, 0x34, 0x38, 0x32, 0x44, 0x00, 0x00, 0x73, 0x2f, 0x6f, 0x93, 0x00, 0xc7, 0xcd };
+ 
+diff --git a/user_io.h b/user_io.h
+index 648736f..2cedc92 100644
+--- a/user_io.h
++++ b/user_io.h
+@@ -211,6 +211,7 @@ void user_io_kbd(uint16_t key, int press);
+ char* user_io_create_config_name(int with_ver = 0);
+ int user_io_get_joy_transl();
+ void user_io_digital_joystick(unsigned char, uint32_t, int);
++void user_io_joystick_word(int idx, uint32_t v); // send a raw 32-bit word to the core as joystick_<idx> (idx 2..5); see guncal.h
+ void user_io_l_analog_joystick(unsigned char, char, char);
+ void user_io_r_analog_joystick(unsigned char, char, char);
+ void user_io_set_joyswap(int swap);
+-- 
+2.43.0
+

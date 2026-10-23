@@ -167,3 +167,22 @@ which build it is). `build/` is git-ignored.
 - The kernel driver keeps only the low byte of the gun's Y (the app compensates; `patches/kernel/` is an optional one-line fix).
 - Fits near 99% area are chaotic; seeds change timing, not the LAB count (Model 2 core builds: `scripts/scan15_sweep.ps1`, not needed for GunCal).
 - Memory files for this project are in `C:/Users/joelw/.claude/projects/C--Users-joelw-Mister-Guncon2/memory/` (read `MEMORY.md`).
+
+## 2026-10-23 night (02:30 BST): PS1 and "all cores" (the user asleep; read this first)
+
+- **Why PS1 "couldn't see the flash":** MiSTer.ini has `main=MiSTer_Physical-CD` for [PSX], [Saturn], [MegaCD], [TurboGrafx16], so those cores ran the
+  physical-disc app (Anime0t4ku/Main_MiSTer_Physical_Disc) with NONE of our patches. Fixed: all our commits carried onto that fork at tag v2.10.0
+  (plus only the frame_clocks read of upstream d8c88df, not its YC change) = `patches-physical-cd/0001..0027` (git am onto v2.10.0; WSL tree
+  /root/build/physdisc, branch guncon-physdisc). The card's own copy is kept as `/media/fat/MiSTer_Physical-CD.orig` (md5 87973185...) to roll back.
+- **Patch 0025:** the probe for EVERY core (not GunCal, not the menu); only light of a field that began after the probe press counts; give-up 160 ms;
+  PSX gets the System 11 sync sizes. **0026:** a still gun on a lit spot (no reports: the kernel drops unchanged values) is taken 2 fields + 8 ms after
+  the probe press; the trace logs the step that ends a sequence. `LIGHTGUN_CRT_PROBE=0` (globally or in a core's ini section) turns the probe off.
+- **On the card now:** `MiSTer` = trace build 00d07278..., `MiSTer.clean` cac81424...; `MiSTer_Physical-CD` = trace build ad6f51c2...,
+  `.clean` abdf7cbc...; PSX loaded. Calibration untouched (44b5b3a5...).
+- **Verified on the MiSTer with a virtual gun** (`tools/mister/fakegun_probe.py`, `fakegun_noprobe.py`): PSX under the patched Physical-CD app and HotD
+  under the main app: probe press 3..8 ms, 40 ms long, aim from the flash after it, real press 35 ms later with the aim in place, released 40 ms later;
+  off-screen = probe only; menu and GunCal untouched. PSX is mapped (`guncal_apply.log`: 704x478i, hs 4690 ns).
+- **NOT verified with the real gun:** PS1 games, Point Blank (now gets the probe: an extra off-screen shot each pull; `[NB1] LIGHTGUN_CRT_PROBE=0` to
+  compare), NES (Duck Hunt counts the probe press as a missed shot), Saturn. A PS1 GunCon game must have the PSX OSD pad set to GunCon.
+- **Left to do:** `scripts/build-physical-cd.sh` (fetch fork v2.10.0, `git am patches-physical-cd/*`, tests, build); README/CORES.md for 0025/0026
+  and the Physical-CD app.

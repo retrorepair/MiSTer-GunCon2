@@ -1,0 +1,48 @@
+From 237e50fe37b394e89cd7190992e1508358e8416c Mon Sep 17 00:00:00 2001
+From: retrorepair <joelwhybrow@googlemail.com>
+Date: Sat, 17 Oct 2026 08:20:55 +0100
+Subject: [PATCH 12/27] input: exact sync pulse sizes for the SNES, Master
+ System and Mega Drive cores
+
+From each core's source: SNES PPU.vhd (HSync 23 dots of 186.2 ns, VSync 3 lines),
+SMS video.vhd (24 pixels, 3 lines), Mega Drive vdp_common.vhd / vdp.vhd (23 pixels
+in the 256-wide mode, 21 in the 320-wide one, VSync 4 lines). Replaces the assumed
+4.7 us / 3 lines for these three cores.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+(cherry picked from commit 30b0103524ed60bbeb47b382bf5646026bcd9d88)
+---
+ input.cpp | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/input.cpp b/input.cpp
+index d465e4f..2334972 100644
+--- a/input.cpp
++++ b/input.cpp
+@@ -2125,6 +2125,8 @@ static const guncal_sync_entry guncal_sync_table[] =
+ 	{ "SYSTEM11", 0, 4690, 3, "Namco System 11 core: PSX GPU, 252 clocks of 53.693 MHz, 3 lines" },
+ 	{ "KonamiGX", 32, 0,   8, "Konami GX core: the K053252 pulse is set by the game; this is what daiskiss writes (Lethal Enforcers II not checked)" },
+ 	{ "NES",      0, 4650, 3, "NES core: 25 dots at 5.37 MHz" },
++	{ "SNES",     0, 4283, 3, "SNES core: PPU.vhd HSYNC_START .. +23 dots of 186.2 ns, VSYNC 3 lines" },
++	{ "SMS",      24, 0,   3, "SMS core: video.vhd hsync from hcount 280 to 474 = 24 pixels, vsync 3 lines" },
+ };
+ 
+ // The NES core scales the gun over the PPU's own dots (0..255) and scanlines (0..239) (NES_zapper.sv), not over the picture it
+@@ -2221,7 +2223,13 @@ static void guncal_apply_universal(int i)
+ 		break;
+ 	}
+ 	if (!strcasecmp(board, "NES")) nes_gun_window(&t);
+-	else if (!strcasecmp(board, "MegaDrive") || !strcasecmp(board, "MegaCD")) megadrive_gun_window(&t);
++	else if (!strcasecmp(board, "MegaDrive") || !strcasecmp(board, "MegaCD"))
++	{
++		// vdp_common.vhd: HSync is 23 pixels in the 256-wide mode and 21 in the 320-wide one, VSync 4 lines (VS_LINES)
++		t.hs_ns = (t.width == 320 ? 21.0 : 23.0) * t.active_ns / t.width;
++		t.vs_lines = 4;
++		megadrive_gun_window(&t);
++	}
+ 
+ 	// recompute when the measured timing or the assumed pulse width changes (the core name can change while a core starts)
+ 	uint32_t sig = v->width * 31u + v->height * 17u + v->htime * 13u + v->ptime * 7u + v->de_h * 5u + v->de_v * 3u + v->frame_clocks + v->ctime * 23u + (v->interlaced ? 1u : 0u) + (uint32_t)t.hs_ns * 11u + (uint32_t)t.vs_lines * 29u;
+-- 
+2.43.0
+

@@ -1,0 +1,81 @@
+From cb5526ff26e2b3039d1cd472f9848aa9547f7f1b Mon Sep 17 00:00:00 2001
+From: retrorepair <joelwhybrow@googlemail.com>
+Date: Thu, 15 Oct 2026 21:09:21 +0100
+Subject: [PATCH 01/27] input: GUNDBG raw CRT-lightgun event trace (measurement
+ aid)
+
+Build with `make GUNDBG=1`. Logs every raw evdev event of a
+QUIRK_LIGHTGUN_CRT device (kernel timestamp, read time, type, code,
+value) to /tmp/gundbg.csv, flushed once a second.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+(cherry picked from commit 8a500ad66796da817c7f9555f6a1f77f22635837)
+---
+ Makefile  |  4 ++++
+ input.cpp | 28 ++++++++++++++++++++++++++++
+ 2 files changed, 32 insertions(+)
+
+diff --git a/Makefile b/Makefile
+index f582fec..ef35e86 100644
+--- a/Makefile
++++ b/Makefile
+@@ -65,6 +65,10 @@ ifeq ($(PROFILING),1)
+ 	DFLAGS += -DPROFILING
+ endif
+ 
++ifeq ($(GUNDBG),1)
++	DFLAGS += -DGUNDBG
++endif
++
+ $(BUILDDIR)/$(PRJ): $(OBJ)
+ 	$(Q)$(info $@)
+ 	$(Q)$(CC) -o $@ $+ $(LFLAGS)
+diff --git a/input.cpp b/input.cpp
+index 2193c2f..6e7b1e1 100644
+--- a/input.cpp
++++ b/input.cpp
+@@ -2019,6 +2019,31 @@ static int kbd_toggle = 0;
+ 
+ static uint32_t crtgun_timeout[NUMDEV] = {};
+ 
++#ifdef GUNDBG
++// Measurement aid, built only with -DGUNDBG: records every raw evdev event of a CRT lightgun
++// (kernel timestamp, MiSTer read time, type, code, value) to /tmp/gundbg.csv, flushed once a second.
++static void gundbg_log(const struct input_event *ev)
++{
++	static FILE *f = NULL;
++	static time_t last_flush = 0;
++	struct timespec now;
++	clock_gettime(CLOCK_REALTIME, &now);
++	if (!f)
++	{
++		f = fopen("/tmp/gundbg.csv", "w");
++		if (!f) return;
++		setvbuf(f, NULL, _IOFBF, 1 << 16);
++		fprintf(f, "kernel_s,read_s,type,code,value\n");
++	}
++	fprintf(f, "%ld.%06ld,%ld.%06ld,%d,%d,%d\n", (long)ev->time.tv_sec, (long)ev->time.tv_usec, (long)now.tv_sec, (long)(now.tv_nsec / 1000), ev->type, ev->code, ev->value);
++	if (now.tv_sec != last_flush)
++	{
++		fflush(f);
++		last_flush = now.tv_sec;
++	}
++}
++#endif
++
+ static unsigned char mouse_btn = 0; //emulated mouse
+ static unsigned char mice_btn = 0;
+ static int mouse_req = 0;
+@@ -5647,6 +5672,9 @@ int input_test(int getchar)
+ 						memset(&ev, 0, sizeof(ev));
+ 						if (read(pool[i].fd, &ev, sizeof(ev)) == sizeof(ev))
+ 						{
++#ifdef GUNDBG
++							if (input[i].quirk == QUIRK_LIGHTGUN_CRT) gundbg_log(&ev);
++#endif
+ 							if (getchar)
+ 							{
+ 								if (ev.type == EV_KEY && ev.value >= 1)
+-- 
+2.43.0
+

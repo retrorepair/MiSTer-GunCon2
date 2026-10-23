@@ -1,0 +1,207 @@
+From cc885f19c6ca1363847c62f30a1e4c4bfc4fc8f1 Mon Sep 17 00:00:00 2001
+From: retrorepair <joelwhybrow@googlemail.com>
+Date: Fri, 23 Oct 2026 02:12:37 +0100
+Subject: [PATCH 25/25] input: the light-gun probe for every core; the PlayStation
+ core's sync sizes
+
+Every core reads its gun at or right after its flash field, before the GunCon 2
+can report that field: House of the Dead was measured (the report 33..35 ms
+after the pull, read before it), the console cores (NES, SMS, Mega Drive, SNES)
+make their light signal from the aim during the frame, and the PlayStation core
+gives the game the aim at each controller poll, once a frame. So the probe is
+used for every core with a GunCon, not by a list: on a pull a probe press makes
+the game flash (the aim off the screen, which every one of these cores treats
+as no light), and the real press follows with the aim from that flash. Not for
+the calibration core or the menu. LIGHTGUN_CRT_PROBE=0 turns it off, also in a
+core's section of MiSTer.ini.
+
+Only the light of a field that began after the probe press is the game's
+answer: a report sooner than one field after the press (the core's measured
+VSync to VSync time) is the picture from before it. The times are compared
+signed, so a report stamped before the press is never taken. No light within
+160 ms of the probe press (was 100) is the reload: Point Blank's flash came 50
+to 100 ms after the pull.
+
+The PlayStation core gets the System 11 core's sync sizes: the same GPU (the
+System 11 core is derived from PSX_MiSTer), 252 clocks of 53.693 MHz, 3 lines.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ input.cpp                  | 16 ++++++++--------
+ lightgun_crt.cpp           |  5 +++--
+ lightgun_crt.h             | 12 ++++++++++--
+ test/lightgun_crt_test.cpp | 34 +++++++++++++++++++++++-----------
+ 4 files changed, 44 insertions(+), 23 deletions(-)
+
+diff --git a/input.cpp b/input.cpp
+index 20ebd28..e6423f9 100644
+--- a/input.cpp
++++ b/input.cpp
+@@ -2126,6 +2126,7 @@ static const guncal_sync_entry guncal_sync_table[] =
+ 	{ "S32",      32, 0,   3, "Sega System 32 core: s32_video.sv hsync hdisp+24..hdisp+56, vsync 3 lines" },
+ 	{ "TaitoB",   64, 0,   3, "Taito B core: taitob_video_timing.sv; jtframe_resync keeps the pulse length" },
+ 	{ "SYSTEM11", 0, 4690, 3, "Namco System 11 core: PSX GPU, 252 clocks of 53.693 MHz, 3 lines" },
++	{ "PSX",      0, 4690, 3, "PlayStation core: the same GPU as the System 11 core (which is built from it), 252 clocks of 53.693 MHz, 3 lines" },
+ 	{ "KonamiGX", 32, 0,   8, "Konami GX core: the K053252 pulse is set by the game; this is what daiskiss writes (Lethal Enforcers II not checked)" },
+ 	{ "NES",      0, 4650, 3, "NES core: 25 dots at 5.37 MHz" },
+ 	{ "SNES",     0, 4283, 3, "SNES core: PPU.vhd HSYNC_START .. +23 dots of 186.2 ns, VSYNC 3 lines" },
+@@ -2310,18 +2311,16 @@ static bool crtgun_beacon_core(void)
+ 	return answer;
+ }
+ 
+-// Cores whose game flashes for one field after the trigger and reads the gun at the end of it, before the GunCon 2 can report that field
+-// (lightgun_crt.h, "Probe"): each shot is preceded by a probe press that makes the game flash. By the core's own name. LIGHTGUN_CRT_PROBE=0 turns it off.
+-static const char *crtgun_probe_cores[] = {
+-	"Model2A",      // House of the Dead (the Model2C core reports this name), measured 2026-10-23: flash report 33..35 ms after the pull, read before it
+-};
+-
++// Every core with a GunCon gets the probe (lightgun_crt.h, "Probe"): each shot is preceded by a probe press that makes the game flash, and
++// the real press follows with the aim from that flash. A game reads its gun at or right after its flash field, before the GunCon 2 can report
++// that field (House of the Dead, measured 2026-10-23: the report 33..35 ms after the pull, read before it; the console cores make their light
++// signal from the aim during the frame). Not for the calibration core or the menu. LIGHTGUN_CRT_PROBE=0 turns it off, in MiSTer.ini or in a
++// core's section of it.
+ static bool crtgun_probe_core(void)
+ {
+ 	if (!cfg.lightgun_crt_probe) return false;
+ 	const char *c = user_io_get_core_name(1);
+-	for (size_t n = 0; n < sizeof(crtgun_probe_cores) / sizeof(*crtgun_probe_cores); n++) if (!strcasecmp(c, crtgun_probe_cores[n])) return true;
+-	return false;
++	return strcasecmp(c, "GUNCAL") && strcasecmp(c, "MENU");
+ }
+ 
+ static void crtgun_get_params(int i, crtgun_params *p)
+@@ -2340,6 +2339,7 @@ static void crtgun_get_params(int i, crtgun_params *p)
+ 	p->beacon = crtgun_beacon_core() ? 1 : 0;
+ 	if (p->beacon) p->mode = 0;       // the beacon measures every shot itself; between shots the aim just follows the gun
+ 	p->probe = !p->beacon && crtgun_probe_core() ? 1 : 0;
++	p->field_ms = (int32_t)(current_video_info.vtime / 100000);    // VSync to VSync, in 10 ns ticks (one field when interlaced)
+ }
+ 
+ // Mode 1 (aim from the game's flash): the core is given the held aim, not the gun's raw axes. Send it whenever it changes.
+diff --git a/lightgun_crt.cpp b/lightgun_crt.cpp
+index 7d6c82b..933de73 100644
+--- a/lightgun_crt.cpp
++++ b/lightgun_crt.cpp
+@@ -252,8 +252,9 @@ void crtgun_report(crtgun_state *s, const crtgun_params *p, uint32_t now_ms)
+ 		s->win_open = false;
+ 	}
+ 
+-	// probe: the first valid reading after the probe press is where the gun saw the flash it caused
+-	if (p->probe && (s->pb_phase == 2 || s->pb_phase == 3) && !s->pb_seen && (int32_t)(now_ms - s->pb_probe_t) > 0 && crtgun_valid(s, p))
++	// probe: the first valid reading of a field that began after the probe press is where the gun saw the flash it caused
++	int32_t field = p->field_ms > 0 ? p->field_ms : CRTGUN_PB_FIELD_MS;
++	if (p->probe && (s->pb_phase == 2 || s->pb_phase == 3) && !s->pb_seen && (int32_t)(now_ms - s->pb_probe_t) >= field && crtgun_valid(s, p))
+ 	{
+ 		s->pb_x = s->raw_x;
+ 		s->pb_y = s->raw_y;
+diff --git a/lightgun_crt.h b/lightgun_crt.h
+index 2a118ce..be3285f 100644
+--- a/lightgun_crt.h
++++ b/lightgun_crt.h
+@@ -45,6 +45,7 @@ struct crtgun_params
+ 	int32_t  mode;          // 0 continuous, 1 aim from the game's flash (see above)
+ 	int32_t  beacon;        // 1: the core flashes the whole picture white when asked (see "Beacon" below); 0: it cannot
+ 	int32_t  probe;         // 1: the game's flash is read before the gun can report it, so a probe press makes it flash first (see "Probe" below)
++	int32_t  field_ms;      // one field of the core's picture, ms (0: not known): a report sooner than this after a press cannot show the game's answer
+ };
+ 
+ // Beacon. A CRT gun reads only where there is light: a dark enemy, or a dark patch of the picture, gives it nothing and the aim is lost,
+@@ -66,11 +67,18 @@ struct crtgun_params
+ // off the screen it counts a reload); the first valid reading after the probe press is where the gun saw that flash; the probe press is released,
+ // the aim is set to that reading, and once the game has seen the trigger up the real press is given with the aim already in place, so the game
+ // reads it whenever it looks. No light after the probe press means the gun is off the screen, and the probe press was the reload.
+-// Costs: every shot also reloads, two flashes, and the shot reaches the game about 75 ms after the pull.
++// Costs: every shot also reloads, two flashes, and the shot reaches the game about 80 ms after the pull.
++// The same holds for every core that reads its gun at or right after the flash field: the console cores make the light signal from the aim
++// during the frame (NES, SMS, Mega Drive, SNES), the PlayStation polls the GunCon once a frame, the arcade I/O boards are read by the game
++// after its flash. So the probe is used for every core (input.cpp, crtgun_probe_core); what the probe press costs is the game's own answer
++// to a shot off the screen: a reload in most games, a missed shot in some (Duck Hunt counts it against its three).
++// Only the light of a field that began after the probe press is the game's answer: a report that arrives sooner than one field after the
++// press (params.field_ms) is the picture from before it.
+ #define CRTGUN_PB_LEAD_MS      3    // the aim is off the screen this long before the probe press (the Model 2 I/O board scans at 1 kHz)
+ #define CRTGUN_PB_PRESS_MS     40   // each press given to the core lasts at least this long
+ #define CRTGUN_PB_GAP_MS       35   // the trigger is up this long before a press, so the game sees it up (two fields)
+-#define CRTGUN_PB_GIVEUP_MS    100  // no light this long after the probe press: the gun is off the screen
++#define CRTGUN_PB_GIVEUP_MS    160  // no light this long after the probe press: the gun is off the screen (Point Blank's flash: 50..100 ms)
++#define CRTGUN_PB_FIELD_MS     16   // one field when the core's timing is not known
+ 
+ struct crtgun_state
+ {
+diff --git a/test/lightgun_crt_test.cpp b/test/lightgun_crt_test.cpp
+index b35e395..c09d6da 100644
+--- a/test/lightgun_crt_test.cpp
++++ b/test/lightgun_crt_test.cpp
+@@ -8,16 +8,16 @@ static int failures = 0;
+ #define CHECK(cond) do { if (!(cond)) { printf("FAIL line %d: %s\n", __LINE__, #cond); failures++; } } while (0)
+ 
+ // default GunCon 2 calibration used by Main_MiSTer: X 145..700, Y 25..245
+-static crtgun_params P = { 145, 700, 25, 245, CRTGUN_DEF_X_VALID_MIN, CRTGUN_DEF_SHOT_MS, CRTGUN_DEF_DARK_MS, CRTGUN_DEF_EDGE_PCT, 0, 0, 0 };
++static crtgun_params P = { 145, 700, 25, 245, CRTGUN_DEF_X_VALID_MIN, CRTGUN_DEF_SHOT_MS, CRTGUN_DEF_DARK_MS, CRTGUN_DEF_EDGE_PCT, 0, 0, 0, 0 };
+ 
+ // the same box with the aim taken from the game's flash
+-static crtgun_params P1 = { 145, 700, 25, 245, CRTGUN_DEF_X_VALID_MIN, CRTGUN_DEF_SHOT_MS, CRTGUN_DEF_DARK_MS, CRTGUN_DEF_EDGE_PCT, 1, 0, 0 };
++static crtgun_params P1 = { 145, 700, 25, 245, CRTGUN_DEF_X_VALID_MIN, CRTGUN_DEF_SHOT_MS, CRTGUN_DEF_DARK_MS, CRTGUN_DEF_EDGE_PCT, 1, 0, 0, 0 };
+ 
+ // the same box for a core that can flash the picture white on request
+-static crtgun_params PB = { 145, 700, 25, 245, CRTGUN_DEF_X_VALID_MIN, CRTGUN_DEF_SHOT_MS, CRTGUN_DEF_DARK_MS, CRTGUN_DEF_EDGE_PCT, 0, 1, 0 };
++static crtgun_params PB = { 145, 700, 25, 245, CRTGUN_DEF_X_VALID_MIN, CRTGUN_DEF_SHOT_MS, CRTGUN_DEF_DARK_MS, CRTGUN_DEF_EDGE_PCT, 0, 1, 0, 0 };
+ 
+ // the same box for a game that reads its one-field flash before the gun can report it (the probe)
+-static crtgun_params PP = { 145, 700, 25, 245, CRTGUN_DEF_X_VALID_MIN, CRTGUN_DEF_SHOT_MS, CRTGUN_DEF_DARK_MS, CRTGUN_DEF_EDGE_PCT, 1, 0, 1 };
++static crtgun_params PP = { 145, 700, 25, 245, CRTGUN_DEF_X_VALID_MIN, CRTGUN_DEF_SHOT_MS, CRTGUN_DEF_DARK_MS, CRTGUN_DEF_EDGE_PCT, 1, 0, 1, 17 };
+ 
+ struct Rig
+ {
+@@ -445,12 +445,10 @@ static void test_probe_no_light_is_the_reload()
+ 	r.report(1037, 0, 5);                                                    // no flash where the gun points
+ 	r.poll(1043);
+ 	CHECK(r.take_release());
+-	r.report(1054, 1, 5);
+-	r.report(1071, 0, 5);
+-	r.report(1088, 1, 5);
+-	r.poll(1102);
+-	CHECK(r.s.pb_phase == 3 && !r.take_press());
+-	r.poll(1103);
++	for (int t = 1054; t < 1160; t += 17) r.report(t, (t / 17) & 1, 5);
++	r.poll(1162);
++	CHECK(r.s.pb_phase == 3 && !r.take_press());                             // Point Blank's flash can come 100 ms after the pull: still waiting
++	r.poll(1163);
+ 	CHECK(r.s.pb_phase == 0 && !r.take_press() && r.s.pub_off);             // no light: the probe press was the reload, nothing else is sent
+ 	r.report(1200, 430, 140);
+ 	CHECK(r.s.pub_off);
+@@ -467,10 +465,23 @@ static void test_probe_light_before_the_probe_press_is_not_the_flash()
+ 	CHECK(r.take_press() && !r.s.pb_seen);
+ 	r.report(1003, 401, 130);                                                // the same ms as the probe press
+ 	CHECK(!r.s.pb_seen);
+-	r.report(1020, 402, 131);
++	r.report(1012, 401, 131);                                                // 9 ms after it: a field that began before the press
++	CHECK(!r.s.pb_seen);
++	r.report(1020, 402, 131);                                                // one field (17 ms) after it
+ 	CHECK(r.s.pb_seen && r.s.pb_x == 402 && r.s.pb_y == 131);
+ }
+ 
++// a report stamped just before the probe press but handled after it is not the flash (the times are compared signed)
++static void test_probe_report_stamped_before_the_press_is_not_the_flash()
++{
++	Rig r(&PP);
++	r.pb_trigger(1000, true);
++	r.poll(1003);
++	CHECK(r.take_press());
++	r.report(1001, 400, 130);
++	CHECK(!r.s.pb_seen);
++}
++
+ static void test_probe_quick_second_pull_releases_and_waits()
+ {
+ 	Rig r(&PP);
+@@ -504,6 +515,7 @@ int main()
+ 	test_probe_dark_scene_shot();
+ 	test_probe_no_light_is_the_reload();
+ 	test_probe_light_before_the_probe_press_is_not_the_flash();
++	test_probe_report_stamped_before_the_press_is_not_the_flash();
+ 	test_probe_quick_second_pull_releases_and_waits();
+ 	test_probe_pull_during_the_measurement_is_the_same_shot();
+ 	test_beacon_steady_gun_on_the_screen();
+-- 
+2.53.0.windows.1
+

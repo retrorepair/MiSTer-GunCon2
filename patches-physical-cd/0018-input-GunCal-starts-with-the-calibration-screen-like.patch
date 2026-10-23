@@ -1,0 +1,40 @@
+From 393101603531fad27d55d364bd76e3a5374aa9ad Mon Sep 17 00:00:00 2001
+From: retrorepair <joelwhybrow@googlemail.com>
+Date: Thu, 22 Oct 2026 23:15:29 +0100
+Subject: [PATCH 18/27] input: GunCal starts with the calibration screen, like
+ a console game's own GunCon calibration
+
+With a calibration already saved, the GunCal core came up on the plain monitor page and the PS1-style calibration (the yellow screen, "aim at
+the cross and shoot") was only reached by holding the trigger for 3 seconds, which nothing on screen says before it is done. Loading the core now
+starts the calibration at once. A saved one is replaced only when the five shots are accepted, so leaving early keeps it, and the monitor page
+is still there after the check page.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+(cherry picked from commit 610fe92e5ad7b5b343789c30009a554443d0bf98)
+---
+ input.cpp | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/input.cpp b/input.cpp
+index 246fea3..efcd6a6 100644
+--- a/input.cpp
++++ b/input.cpp
+@@ -2531,10 +2531,13 @@ static void guncal_service(const struct input_event *ev)
+ 		memset(&f, 0, sizeof(f));
+ 		guncal_file_name(d, name, sizeof(name));
+ 		int have = FileLoadConfig(name, v, sizeof(v)) && guncal_fit_from_file(v, &f);
+-		guncal_init(&gcal, have ? &f : NULL, cfg.guncal_margin);
++		// Like a console game's own GunCon calibration: loading the core puts the calibration screen up at once, whether or not one was
++		// saved before. A saved one is replaced only when the five shots are accepted (leaving early keeps it), and the monitor page is
++		// still there, after the check page.
++		guncal_init(&gcal, NULL, cfg.guncal_margin);
+ 		gcal_x = gcal_y = gcal_trig = 0;
+ 		gcal_on = true;
+-		printf("GunCal: %s\n", have ? "loaded the saved calibration" : "no saved calibration, starting the sequence");
++		printf("GunCal: starting the calibration%s\n", have ? " (the saved one is replaced when the five shots are accepted)" : "");
+ 		guncal_send(true);
+ 		gcal_refresh = now + 500;
+ 	}
+-- 
+2.43.0
+

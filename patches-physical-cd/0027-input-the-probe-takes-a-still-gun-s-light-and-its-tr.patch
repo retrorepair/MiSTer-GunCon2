@@ -1,0 +1,156 @@
+From dcebeef42e97df1f2ac83300665c2df3c16c3bd6 Mon Sep 17 00:00:00 2001
+From: retrorepair <joelwhybrow@googlemail.com>
+Date: Fri, 23 Oct 2026 02:19:03 +0100
+Subject: [PATCH 27/27] input: the probe takes a still gun's light, and its
+ trace logs the step that ends it
+
+A gun held still on a lit spot sends nothing new: the kernel reports changes
+only, and losing the light would have changed X to 0 or 1. Found on the MiSTer
+with a virtual gun: after the probe press no report came, so the flash was
+never "seen" and the shot would have been a reload. A valid reading that still
+stands two fields after the probe press (the field after it and the flash
+field) plus the GunCon 2's report time (8 ms) is now where the gun saw the
+flash, as the beacon already does with what the gun last reported.
+
+The tick logged a probe step only while a sequence was still running after it,
+so the step that ended one (the release of the real press) was missing from the
+GUNDBG trace; it is logged now.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+(cherry picked from commit 69ff03ed50591d3eb2b723d921c2da8f2b7514b5)
+---
+ input.cpp                  | 11 ++++++-----
+ lightgun_crt.cpp           | 18 ++++++++++++++++--
+ lightgun_crt.h             |  4 ++++
+ test/lightgun_crt_test.cpp | 21 +++++++++++++++++++++
+ 4 files changed, 47 insertions(+), 7 deletions(-)
+
+diff --git a/input.cpp b/input.cpp
+index dda08f9..4e1c77d 100644
+--- a/input.cpp
++++ b/input.cpp
+@@ -2451,18 +2451,19 @@ static void crtgun_tick(void)
+ 		if (input[i].quirk != QUIRK_LIGHTGUN_CRT || !crtgun_sent_ok[i]) continue;    // a gun that has reported at least once
+ 		crtgun_params p;
+ 		crtgun_get_params(i, &p);
++#ifdef GUNDBG
++		bool was_busy = p.probe && ((crtgun[i].pb_phase != 0 && crtgun[i].pb_phase != 4) || crtgun[i].pb_pressed);
++#endif
+ 		crtgun_update(&crtgun[i], &p, now);
+ 		crtgun_beacon_poll(&crtgun[i], &p, now);
+ 		crtgun_probe_poll(&crtgun[i], &p, now);
+ 		crtgun_deliver(i, &p);
+ 		crtgun_beacon_apply(i, &p);
+-		if (p.probe && ((crtgun[i].pb_phase != 0 && crtgun[i].pb_phase != 4) || crtgun[i].pb_pressed))
+-		{
+-			busy = true;
++		bool is_busy = p.probe && ((crtgun[i].pb_phase != 0 && crtgun[i].pb_phase != 4) || crtgun[i].pb_pressed);
++		if (is_busy) busy = true;
+ #ifdef GUNDBG
+-			gundbg_log_out(i, &crtgun[i], now);         // the presses are timed here, between gun reports
++		if (was_busy || is_busy) gundbg_log_out(i, &crtgun[i], now);   // the presses are timed here, between gun reports (the last step too)
+ #endif
+-		}
+ 	}
+ 	next = GetTimer(busy ? 2 : 8);      // a probe sequence times its presses in a few ms
+ }
+diff --git a/lightgun_crt.cpp b/lightgun_crt.cpp
+index 933de73..16076ab 100644
+--- a/lightgun_crt.cpp
++++ b/lightgun_crt.cpp
+@@ -229,6 +229,12 @@ void crtgun_beacon_poll(crtgun_state *s, const crtgun_params *p, uint32_t now_ms
+ 	}
+ }
+ 
++// one field of the core's picture, ms
++static int32_t pb_field(const crtgun_params *p)
++{
++	return p->field_ms > 0 ? p->field_ms : CRTGUN_PB_FIELD_MS;
++}
++
+ // One complete gun report has arrived (the SYN event): in mode 1 it may be part of the flash measurement.
+ void crtgun_report(crtgun_state *s, const crtgun_params *p, uint32_t now_ms)
+ {
+@@ -253,8 +259,7 @@ void crtgun_report(crtgun_state *s, const crtgun_params *p, uint32_t now_ms)
+ 	}
+ 
+ 	// probe: the first valid reading of a field that began after the probe press is where the gun saw the flash it caused
+-	int32_t field = p->field_ms > 0 ? p->field_ms : CRTGUN_PB_FIELD_MS;
+-	if (p->probe && (s->pb_phase == 2 || s->pb_phase == 3) && !s->pb_seen && (int32_t)(now_ms - s->pb_probe_t) >= field && crtgun_valid(s, p))
++	if (p->probe && (s->pb_phase == 2 || s->pb_phase == 3) && !s->pb_seen && (int32_t)(now_ms - s->pb_probe_t) >= pb_field(p) && crtgun_valid(s, p))
+ 	{
+ 		s->pb_x = s->raw_x;
+ 		s->pb_y = s->raw_y;
+@@ -300,6 +305,15 @@ void crtgun_probe_poll(crtgun_state *s, const crtgun_params *p, uint32_t now_ms)
+ 	if (!p->probe) return;
+ 	bool up_long = !s->pb_rel_seen || (uint32_t)(now_ms - s->pb_rel_t) >= CRTGUN_PB_GAP_MS;
+ 
++	// a gun held still on a lit spot sends nothing: still lit, unchanged, two fields after the probe press is where it saw the flash
++	if ((s->pb_phase == 2 || s->pb_phase == 3) && !s->pb_seen && crtgun_valid(s, p) &&
++	    (int32_t)(now_ms - s->pb_probe_t) >= 2 * pb_field(p) + CRTGUN_PB_REPORT_MS)
++	{
++		s->pb_x = s->raw_x;
++		s->pb_y = s->raw_y;
++		s->pb_seen = true;
++	}
++
+ 	switch (s->pb_phase)
+ 	{
+ 	case 1:     // the aim is off the screen: the probe press
+diff --git a/lightgun_crt.h b/lightgun_crt.h
+index be3285f..05c8531 100644
+--- a/lightgun_crt.h
++++ b/lightgun_crt.h
+@@ -79,6 +79,10 @@ struct crtgun_params
+ #define CRTGUN_PB_GAP_MS       35   // the trigger is up this long before a press, so the game sees it up (two fields)
+ #define CRTGUN_PB_GIVEUP_MS    160  // no light this long after the probe press: the gun is off the screen (Point Blank's flash: 50..100 ms)
+ #define CRTGUN_PB_FIELD_MS     16   // one field when the core's timing is not known
++// A gun held still on a lit spot sends nothing new (the kernel reports changes only), and no light would have changed X to 0 or 1. So a
++// valid reading that still stands two fields after the probe press (the field after it and the flash field), plus the time the GunCon 2
++// takes to report a field, is where the gun saw the flash. The House of the Dead trace has the flash report two fields after the pull.
++#define CRTGUN_PB_REPORT_MS    8    // a field's report reaches the app within this after the field (the gun's USB interval, 8 ms)
+ 
+ struct crtgun_state
+ {
+diff --git a/test/lightgun_crt_test.cpp b/test/lightgun_crt_test.cpp
+index c09d6da..9886477 100644
+--- a/test/lightgun_crt_test.cpp
++++ b/test/lightgun_crt_test.cpp
+@@ -471,6 +471,26 @@ static void test_probe_light_before_the_probe_press_is_not_the_flash()
+ 	CHECK(r.s.pb_seen && r.s.pb_x == 402 && r.s.pb_y == 131);
+ }
+ 
++// a gun held still on a lit spot sends nothing after the press: still lit and unchanged two fields (+ 8 ms) after it is the flash
++static void test_probe_still_gun_on_a_lit_spot()
++{
++	Rig r(&PP);                                                              // field 17 ms
++	r.report(990, 400, 130);
++	r.pb_trigger(1000, true);
++	r.poll(1003);
++	CHECK(r.take_press());
++	r.poll(1043);
++	CHECK(r.take_release() && !r.s.pb_seen);
++	r.poll(1044);
++	CHECK(!r.s.pb_seen);                                                     // 41 ms: the flash field's report could still come
++	r.poll(1045);
++	CHECK(r.s.pb_seen && r.s.pb_x == 400 && r.s.pb_y == 130);               // 42 ms = 2 x 17 + 8
++	r.poll(1046);
++	CHECK(!r.s.pub_off && r.s.pub_x == 400 && r.s.pub_y == 130);
++	r.poll(1078);
++	CHECK(r.take_press() && r.s.pb_phase == 4);
++}
++
+ // a report stamped just before the probe press but handled after it is not the flash (the times are compared signed)
+ static void test_probe_report_stamped_before_the_press_is_not_the_flash()
+ {
+@@ -516,6 +536,7 @@ int main()
+ 	test_probe_no_light_is_the_reload();
+ 	test_probe_light_before_the_probe_press_is_not_the_flash();
+ 	test_probe_report_stamped_before_the_press_is_not_the_flash();
++	test_probe_still_gun_on_a_lit_spot();
+ 	test_probe_quick_second_pull_releases_and_waits();
+ 	test_probe_pull_during_the_measurement_is_the_same_shot();
+ 	test_beacon_steady_gun_on_the_screen();
+-- 
+2.43.0
+
