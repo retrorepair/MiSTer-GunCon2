@@ -1,0 +1,34 @@
+From fc981b73f627d7fdfd176dd3a636f5d507457ee8 Mon Sep 17 00:00:00 2001
+From: retrorepair <joelwhybrow@googlemail.com>
+Date: Fri, 23 Oct 2026 00:50:40 +0100
+Subject: [PATCH 22/22] input: the tracker drops only the gun's X and Y, so its D-pad
+ works again
+
+With the tracker on, every absolute-axis event of a CRT gun was dropped (the core is given the tracker's result instead of the raw axes), which
+also threw away the GunCon 2's D-pad (ABS_HAT0X/Y): it stopped working in the menu and in games from the moment the patched app was installed.
+Only ABS_X and ABS_Y are now dropped; the other axes go on to the normal joystick handling.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ input.cpp | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/input.cpp b/input.cpp
+index 0ebdfc3..02a9468 100644
+--- a/input.cpp
++++ b/input.cpp
+@@ -6637,8 +6637,9 @@ int input_test(int getchar)
+ 									if (!cfg.lightgun_crt_tracker || crtgun[i].raw_x >= (int32_t)cfg.lightgun_crt_x_valid_min)
+ 										menu_lightgun_cb(i, ev.type, ev.code, ev.value);
+ 
+-									// With the tracker the core is given its result by crtgun_deliver() (after every event and on a timer), not the raw axes.
+-									if (cfg.lightgun_crt_tracker) continue;
++									// With the tracker the core is given its result by crtgun_deliver() (after every event and on a timer), not the raw X and Y.
++									// Only those two: the D-pad (ABS_HAT0X/Y) and any other axis of the gun go on to the normal joystick handling below.
++									if (cfg.lightgun_crt_tracker && (ev.code == ABS_X || ev.code == ABS_Y)) continue;
+ 
+ 									if (ev.code == ABS_X)
+ 									{
+-- 
+2.53.0.windows.1
+

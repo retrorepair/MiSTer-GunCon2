@@ -1,0 +1,30 @@
+From c7df6f107f5dc7f4c826feaa2a85dd69bd61fb01 Mon Sep 17 00:00:00 2001
+From: retrorepair <joelwhybrow@googlemail.com>
+Date: Fri, 23 Oct 2026 00:21:25 +0100
+Subject: [PATCH 21/21] input: the Sega Model 2A core (House of the Dead) gets the
+ Model 2's sync pulse sizes
+
+The core reports its own name as Model2A, which the per-core sync table did not know, so its mapping used the default 4.7 us HSync width instead
+of the Model 2 core's 64 pixels (6.2 us): every aim about 15 pixels of the GunCal grid (3% of the width) off. The log of the running core shows the
+timing is the Model 2's: 6980 ns from the end of HSync to the picture is 72 pixels, H_TOTAL - H_SYNC_END (656 - 584) in m2_video_timing.sv.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ input.cpp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/input.cpp b/input.cpp
+index 3fd1de4..0ebdfc3 100644
+--- a/input.cpp
++++ b/input.cpp
+@@ -2121,6 +2121,7 @@ static const guncal_sync_entry guncal_sync_table[] =
+ {
+ 	{ "NB1",      32, 0,   3, "Namco NB-1 core: 32 px at 6.048 MHz, 3 lines" },
+ 	{ "Model2",   64, 0,   3, "Sega Model 2 core: m2_video_timing.sv H_SYNC_END - H_SYNC_START, VI_SYNC_END - VI_SYNC_START" },
++	{ "Model2A",  64, 0,   3, "Sega Model 2A core (also the author's House of the Dead build, whose core name is Model2A): the same timing module; measured 6980 ns from the end of HSync to the picture = 72 pixels = H_TOTAL - H_SYNC_END (656 - 584)" },
+ 	{ "SXB",      32, 0,   4, "Sega X Board core: xb_video_timing.sv HS_START..HS_END, VS_START..VS_END" },
+ 	{ "S32",      32, 0,   3, "Sega System 32 core: s32_video.sv hsync hdisp+24..hdisp+56, vsync 3 lines" },
+ 	{ "TaitoB",   64, 0,   3, "Taito B core: taitob_video_timing.sv; jtframe_resync keeps the pulse length" },
+-- 
+2.53.0.windows.1
+

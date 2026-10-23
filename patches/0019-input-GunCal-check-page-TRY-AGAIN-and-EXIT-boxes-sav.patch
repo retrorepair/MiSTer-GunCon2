@@ -1,0 +1,321 @@
+From 201f87b37dad0541e68d4e1657d84ae5af108d15 Mon Sep 17 00:00:00 2001
+From: retrorepair <joelwhybrow@googlemail.com>
+Date: Thu, 22 Oct 2026 23:43:47 +0100
+Subject: [PATCH 19/19] input: GunCal's check page has TRY AGAIN and EXIT boxes; the
+ calibration is saved only on EXIT
+
+After the five shots the calibration was saved at once and the check page said "press A or B", which nobody could tell. Now the check page has two
+boxes; a pull there flashes the screen white and the gun's readings in the flash (never where it pointed before the flash) are tested against the
+boxes, exactly like a calibration shot. EXIT saves the calibration and loads the menu core, TRY AGAIN starts over, and nothing is saved before
+EXIT. A on the gun does what EXIT does, B saves and shows the monitor page. Host tests cover the flash, the boxes and the save.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ guncal.cpp           | 59 ++++++++++++++++++++++++++++++++++----------
+ guncal.h             | 25 +++++++++++++++----
+ input.cpp            | 11 ++++++++-
+ test/guncal_test.cpp | 50 ++++++++++++++++++++++++++++++++-----
+ 4 files changed, 120 insertions(+), 25 deletions(-)
+
+diff --git a/guncal.cpp b/guncal.cpp
+index 207e650..71ec598 100644
+--- a/guncal.cpp
++++ b/guncal.cpp
+@@ -122,6 +122,14 @@ int guncal_core_edges(const guncal_fit *f, const guncal_core_timing *t, int out[
+ 	return out[0] != out[1] && out[2] != out[3];
+ }
+ 
++int guncal_button_at(int px, int py)
++{
++	if (py < GUNCAL_BTN_Y0 || py > GUNCAL_BTN_Y1) return GUNCAL_BTN_NONE;
++	if (px >= GUNCAL_BTN_RETRY_X0 && px <= GUNCAL_BTN_RETRY_X1) return GUNCAL_BTN_RETRY;
++	if (px >= GUNCAL_BTN_EXIT_X0 && px <= GUNCAL_BTN_EXIT_X1) return GUNCAL_BTN_EXIT;
++	return GUNCAL_BTN_NONE;
++}
++
+ // ---------------------------------------------------------------- sequence
+ 
+ static int median(int *v, int n)
+@@ -162,12 +170,14 @@ void guncal_nudge(guncal_sm *s, int delta_pct)
+ 	s->margin_pct = m;
+ }
+ 
+-void guncal_accept(guncal_sm *s)
++void guncal_accept(guncal_sm *s, int to_monitor)
+ {
+-	if (s->state == GCS_VERIFY)
++	if (s->state == GCS_VERIFY && s->fit.valid)
+ 	{
+-		s->state = GCS_MONITOR;
++		s->saved = 1;                        // only now is the calibration kept
+ 		s->msg = GUNCAL_MSG_NONE;
++		if (to_monitor) s->state = GCS_MONITOR;
++		else s->exit_req = 1;
+ 	}
+ }
+ 
+@@ -180,9 +190,9 @@ void guncal_report(guncal_sm *s, int x, int y, int trig, uint32_t now_ms)
+ 	{
+ 		s->t_trig = now_ms;
+ 		s->hold_fired = 0;
+-		if (s->state == GCS_AIM)
++		if (s->state == GCS_AIM || (s->state == GCS_VERIFY && s->fit.valid))
+ 		{
+-			s->state = GCS_COLLECT;
++			s->state = (s->state == GCS_AIM) ? GCS_COLLECT : GCS_VCOLLECT;   // either way the screen flashes and the readings in it are the aim
+ 			s->t_press = now_ms;
+ 			s->n = 0;
+ 			s->first_valid_dt = 0;
+@@ -192,7 +202,7 @@ void guncal_report(guncal_sm *s, int x, int y, int trig, uint32_t now_ms)
+ 	}
+ 	s->trig = trig;
+ 
+-	if (s->state == GCS_COLLECT && x >= GUNCAL_VALID_X && (uint32_t)(now_ms - s->t_press) <= GUNCAL_COLLECT_MS && s->n < GUNCAL_SAMPLES_MAX)
++	if ((s->state == GCS_COLLECT || s->state == GCS_VCOLLECT) && x >= GUNCAL_VALID_X && (uint32_t)(now_ms - s->t_press) <= GUNCAL_COLLECT_MS && s->n < GUNCAL_SAMPLES_MAX)
+ 	{
+ 		if (!s->first_valid_dt) s->first_valid_dt = (now_ms - s->t_press) ? (now_ms - s->t_press) : 1;
+ 		s->xs[s->n] = x;
+@@ -225,10 +235,9 @@ void guncal_tick(guncal_sm *s, uint32_t now_ms)
+ 				guncal_fit f;
+ 				if (guncal_fit_points(s->raw, s->tpos, GUNCAL_NPOINTS, &f))
+ 				{
+-					s->fit = f;
+-					s->saved = 1;
++					s->fit = f;                  // kept only when EXIT is shot (guncal_accept / the check page)
+ 					s->state = GCS_VERIFY;
+-					s->msg = GUNCAL_MSG_SAVED;
++					s->msg = GUNCAL_MSG_NONE;
+ 				}
+ 				else
+ 				{
+@@ -246,7 +255,30 @@ void guncal_tick(guncal_sm *s, uint32_t now_ms)
+ 		}
+ 	}
+ 
+-	if (s->trig && !s->hold_fired && (uint32_t)(now_ms - s->t_trig) >= GUNCAL_HOLD_MS && s->state != GCS_COLLECT)
++	// A shot on the check page, measured in the flash like the calibration shots, then tested against the two buttons.
++	if (s->state == GCS_VCOLLECT && (uint32_t)(now_ms - s->t_press) >= GUNCAL_COLLECT_MS)
++	{
++		s->state = GCS_VERIFY;
++		if (s->n >= GUNCAL_MIN_SAMPLES)
++		{
++			int px, py;
++			guncal_raw_to_px(&s->fit, median(s->xs, s->n), median(s->ys, s->n), &px, &py);
++			int b = guncal_button_at(px, py);
++			if (b == GUNCAL_BTN_EXIT)
++			{
++				s->saved = 1;
++				s->exit_req = 1;
++			}
++			else if (b == GUNCAL_BTN_RETRY)
++			{
++				s->state = GCS_AIM;
++				s->point = 0;
++				s->msg = GUNCAL_MSG_NONE;
++			}
++		}
++	}
++
++	if (s->trig && !s->hold_fired && (uint32_t)(now_ms - s->t_trig) >= GUNCAL_HOLD_MS && s->state != GCS_COLLECT && s->state != GCS_VCOLLECT)
+ 	{
+ 		s->hold_fired = 1;
+ 		s->state = GCS_AIM;
+@@ -257,10 +289,11 @@ void guncal_tick(guncal_sm *s, uint32_t now_ms)
+ 
+ uint32_t guncal_cmd_word(const guncal_sm *s)
+ {
+-	uint32_t page = (s->state == GCS_MONITOR) ? GUNCAL_PAGE_MONITOR : (s->state == GCS_VERIFY) ? GUNCAL_PAGE_VERIFY : GUNCAL_PAGE_CAL;
++	int check = (s->state == GCS_VERIFY || s->state == GCS_VCOLLECT);
++	uint32_t page = (s->state == GCS_MONITOR) ? GUNCAL_PAGE_MONITOR : check ? GUNCAL_PAGE_VERIFY : GUNCAL_PAGE_CAL;
+ 	uint32_t w = page | ((uint32_t)(s->point & 15) << 2) | ((uint32_t)(s->flash_seq & 3) << 6) | ((uint32_t)(s->msg & 3) << 8);
+ 
+-	if ((s->state == GCS_MONITOR || s->state == GCS_VERIFY) && s->fit.valid && s->rawx >= GUNCAL_VALID_X)
++	if ((s->state == GCS_MONITOR || check) && s->fit.valid && s->rawx >= GUNCAL_VALID_X)
+ 	{
+ 		int px, py;
+ 		guncal_raw_to_px(&s->fit, s->rawx, s->rawy, &px, &py);
+@@ -280,7 +313,7 @@ uint32_t guncal_target_word(const guncal_sm *s)
+ {
+ 	guncal_target t = guncal_target_xy(s->point, s->margin_pct);
+ 	// during the check page the ring sits in the middle of the picture
+-	if (s->state == GCS_VERIFY) t = guncal_target_xy(0, s->margin_pct);
++	if (s->state == GCS_VERIFY || s->state == GCS_VCOLLECT) t = guncal_target_xy(0, s->margin_pct);
+ 	return (uint32_t)t.x | ((uint32_t)t.y << 10) | ((uint32_t)GUNCAL_NPOINTS << 18);
+ }
+ 
+diff --git a/guncal.h b/guncal.h
+index 748d43b..30b082a 100644
+--- a/guncal.h
++++ b/guncal.h
+@@ -11,7 +11,9 @@
+ // the core's flash are the measurement, and a least-squares line per axis maps core pixels to raw gun units:
+ //     raw_x = ax * px + bx        raw_y = ay * py + by
+ // Five targets (centre and the four corners) give a long baseline both ways, so the aiming noise of a hand-held
+-// gun averages out. After the fit the core shows a check page with a live crosshair; A or B ends it.
++// gun averages out. After the fit the core shows a check page: the target crosshair, a live crosshair for the gun, and two boxes, TRY AGAIN and EXIT. A shot at a
++// box is measured exactly like a calibration shot (the screen flashes white, the first valid reports are the aim), never taken from where the
++// gun pointed before the flash. EXIT saves the calibration and leaves the core; TRY AGAIN starts over. Nothing is saved before EXIT.
+ // This module holds that maths and the sequencing. It has no MiSTer dependencies so it can be tested on the host.
+ 
+ #define GUNCAL_NPOINTS      5
+@@ -97,9 +99,21 @@ int guncal_core_edges(const guncal_fit *f, const guncal_core_timing *t, int out[
+ // The range an on-screen aim is kept within: e shrunk by pct percent of its span at each end. Same order as e: { y_top, y_bottom, x_left, x_right }.
+ void guncal_inset_range(const int e[4], double pct, int out[4]);
+ 
++// ---- the check page's buttons ----
++//
++// In core pixels. The core draws them (cores/GunCal/rtl/guncal.v: in_btn_*; keep the numbers in step).
++#define GUNCAL_BTN_Y0        168
++#define GUNCAL_BTN_Y1        191
++#define GUNCAL_BTN_RETRY_X0  108
++#define GUNCAL_BTN_RETRY_X1  240
++#define GUNCAL_BTN_EXIT_X0   288
++#define GUNCAL_BTN_EXIT_X1   420
++enum { GUNCAL_BTN_NONE = 0, GUNCAL_BTN_RETRY = 1, GUNCAL_BTN_EXIT = 2 };
++int guncal_button_at(int px, int py);
++
+ // ---- the sequence ----
+ 
+-enum { GCS_MONITOR = 0, GCS_AIM, GCS_COLLECT, GCS_VERIFY };
++enum { GCS_MONITOR = 0, GCS_AIM, GCS_COLLECT, GCS_VERIFY, GCS_VCOLLECT };   // VCOLLECT: a shot on the check page is being measured
+ 
+ struct guncal_sm
+ {
+@@ -120,7 +134,8 @@ struct guncal_sm
+ 	int      msg;
+ 	uint32_t first_valid_dt;                     // ms from the pull to the first valid report (0 = none yet)
+ 	guncal_fit fit;
+-	int      saved;                              // a new fit is ready for the caller to store
++	int      saved;                              // the fit is accepted: the caller stores it (and logs it)
++	int      exit_req;                           // EXIT (or A): the caller leaves the core once it has stored the fit
+ 	int      shot_done;                          // a shot just finished: shot_point/shot_n/shot_ok describe it (caller clears)
+ 	int      shot_point, shot_n, shot_ok;
+ };
+@@ -129,10 +144,10 @@ void guncal_init(guncal_sm *s, const guncal_fit *stored, int margin_pct);   // s
+ void guncal_nudge(guncal_sm *s, int delta_pct);                                // move the targets in or out (gun D-pad)
+ void guncal_report(guncal_sm *s, int x, int y, int trig, uint32_t now_ms);   // one raw gun report
+ void guncal_tick(guncal_sm *s, uint32_t now_ms);                              // call regularly
+-void guncal_accept(guncal_sm *s);                                              // A or B on the check page: finish
++void guncal_accept(guncal_sm *s, int to_monitor);                             // A (to_monitor 0: save and exit) or B (1: save and show the monitor page) on the check page
+ uint32_t guncal_cmd_word(const guncal_sm *s);
+ 
+-// Words sent to the core:
++// Words sent to the core (the check page's pointer is shown on the monitor page and while a check shot is measured too):
+ //   joystick_4 (guncal_cmd_word): [1:0] page  [5:2] target  [7:6] flash sequence  [9:8] message  [10] pointer valid
+ //                                 [20:11] pointer x (core px)  [28:21] pointer y (core px)
+ //   joystick_3 (guncal_target_word): [9:0] target x  [17:10] target y  [21:18] number of targets   (core px)
+diff --git a/input.cpp b/input.cpp
+index 74b614a..3fd1de4 100644
+--- a/input.cpp
++++ b/input.cpp
+@@ -2547,7 +2547,7 @@ static void guncal_service(const struct input_event *ev)
+ 		else if (ev->type == EV_ABS && ev->code == ABS_Y) gcal_y = ev->value;
+ 		else if (ev->type == EV_KEY && ev->code == GUNCON2_TRIGGER_CODE) gcal_trig = ev->value ? 1 : 0;
+ 		else if (ev->type == EV_ABS && ev->code == ABS_HAT0Y && ev->value) guncal_nudge(&gcal, ev->value < 0 ? 2 : -2);   // D-pad up: targets in, down: out
+-		else if (ev->type == EV_KEY && (ev->code == 0x130 || ev->code == 0x131) && ev->value == 1) guncal_accept(&gcal);  // A or B: end the check page
++		else if (ev->type == EV_KEY && (ev->code == 0x130 || ev->code == 0x131) && ev->value == 1) guncal_accept(&gcal, ev->code == 0x131);  // A: save and exit, B: save and show the monitor page
+ 		else return;
+ 
+ 		now = (uint32_t)ev->time.tv_sec * 1000u + (uint32_t)ev->time.tv_usec / 1000u;
+@@ -2597,6 +2597,15 @@ static void guncal_service(const struct input_event *ev)
+ 			name, gcal.fit.ax, gcal.fit.bx, gcal.fit.ay, gcal.fit.by, gcal.fit.resid_x, gcal.fit.resid_y);
+ 	}
+ 
++	if (gcal.exit_req)
++	{
++		// EXIT was shot (or A pressed): the calibration is stored above, so leave the core for the menu
++		gcal.exit_req = 0;
++		printf("GunCal: calibration kept, leaving the core\n");
++		fpga_load_rbf("menu.rbf");
++		return;
++	}
++
+ 	bool refresh = (int32_t)(now - gcal_refresh) >= 0;
+ 	if (refresh) gcal_refresh = now + 500;
+ 	guncal_send(refresh);
+diff --git a/test/guncal_test.cpp b/test/guncal_test.cpp
+index 4f449e3..4640065 100644
+--- a/test/guncal_test.cpp
++++ b/test/guncal_test.cpp
+@@ -107,6 +107,18 @@ static void shoot(guncal_sm *s, uint32_t *t, int with_light)
+ 	guncal_tick(s, *t);
+ }
+ 
++// the same for a shot at a given core pixel (the check page's buttons)
++static void shoot_at(guncal_sm *s, uint32_t *t, int px, int py, int with_light)
++{
++	int x = with_light ? rawx_of(px) : 0, y = with_light ? rawy_of(py) : 5;
++	guncal_report(s, x, y, 0, *t); *t += 20;
++	guncal_report(s, x, y, 1, *t); *t += 20;
++	for (int i = 0; i < 6; i++) { guncal_report(s, x + (i & 1), y, 1, *t); *t += 20; }
++	guncal_report(s, x, y, 0, *t); *t += 20;
++	*t += 400;
++	guncal_tick(s, *t);
++}
++
+ static void test_full_sequence()
+ {
+ 	guncal_sm s;
+@@ -117,9 +129,9 @@ static void test_full_sequence()
+ 	uint32_t t = 1000;
+ 	for (int k = 0; k < GUNCAL_NPOINTS - 1; k++) { shoot(&s, &t, 1); CHECK(s.point == k + 1 && s.state == GCS_AIM); }
+ 	shoot(&s, &t, 1);
+-	CHECK(s.state == GCS_VERIFY && s.fit.valid && s.saved);
++	CHECK(s.state == GCS_VERIFY && s.fit.valid && !s.saved && !s.exit_req);    // nothing is kept before EXIT
+ 	CHECK((guncal_cmd_word(&s) & 3) == GUNCAL_PAGE_VERIFY);
+-	CHECK(((guncal_cmd_word(&s) >> 8) & 3) == GUNCAL_MSG_SAVED);
++	CHECK(((guncal_cmd_word(&s) >> 8) & 3) == GUNCAL_MSG_NONE);
+ 	CHECK(fabs(s.fit.ax - AX) < 0.02 && fabs(s.fit.ay - AY) < 0.02);
+ 	guncal_target ctr = guncal_target_xy(0, 12);
+ 	CHECK((guncal_target_word(&s) & 0x3FF) == (uint32_t)ctr.x);         // the check page ring is at the centre
+@@ -133,8 +145,34 @@ static void test_full_sequence()
+ 	guncal_report(&s, 0, 5, 0, t + 20);                // no light: no pointer
+ 	CHECK(!((guncal_cmd_word(&s) >> 10) & 1));
+ 
+-	guncal_accept(&s);                                 // A or B
+-	CHECK(s.state == GCS_MONITOR && (guncal_cmd_word(&s) & 3) == GUNCAL_PAGE_MONITOR);
++	// the check page's buttons: a pull makes the screen flash and the shot is what the gun saw in it, tested against the boxes
++	CHECK(guncal_button_at(150, 184) == GUNCAL_BTN_RETRY && guncal_button_at(375, 184) == GUNCAL_BTN_EXIT);
++	CHECK(guncal_button_at(264, 120) == GUNCAL_BTN_NONE && guncal_button_at(264, 184) == GUNCAL_BTN_NONE);
++	{
++		guncal_sm f = s;
++		uint32_t t2 = t;
++		int seq0 = f.flash_seq;
++		guncal_report(&f, rawx_of(375), rawy_of(184), 0, t2);
++		guncal_report(&f, rawx_of(375), rawy_of(184), 1, t2 + 20);
++		CHECK(f.state == GCS_VCOLLECT && f.flash_seq != seq0 && (guncal_cmd_word(&f) & 3) == GUNCAL_PAGE_VERIFY);
++		guncal_tick(&f, t2 + 100);
++		CHECK(f.state == GCS_VCOLLECT && !f.saved && !f.exit_req);              // not decided before the flash is over
++
++		guncal_sm r = s, e = s, n = s, d = s;
++		shoot_at(&r, &t2, 150, 184, 1);
++		CHECK(r.state == GCS_AIM && r.point == 0 && !r.saved && !r.exit_req);   // TRY AGAIN
++		shoot_at(&e, &t2, 375, 184, 1);
++		CHECK(e.saved && e.exit_req);                                           // EXIT: kept, and the caller leaves
++		shoot_at(&n, &t2, 264, 120, 1);
++		CHECK(n.state == GCS_VERIFY && !n.saved && !n.exit_req);                // the ring is not a button
++		shoot_at(&d, &t2, 375, 184, 0);
++		CHECK(d.state == GCS_VERIFY && !d.saved && !d.exit_req);                // no light in the flash: no shot
++	}
++	guncal_sm a = s, b = s;
++	guncal_accept(&a, 0);                              // A
++	CHECK(a.saved && a.exit_req);
++	guncal_accept(&b, 1);                              // B
++	CHECK(b.saved && !b.exit_req && b.state == GCS_MONITOR && (guncal_cmd_word(&b) & 3) == GUNCAL_PAGE_MONITOR);
+ }
+ 
+ static void test_missed_shot_repeats_the_point()
+@@ -170,8 +208,8 @@ static void test_hold_trigger_restarts()
+ 	CHECK(v.state == GCS_VERIFY);
+ 	guncal_report(&v, 400, 100, 1, t);
+ 	guncal_report(&v, 400, 100, 0, t + 100);
+-	guncal_tick(&v, t + 200);
+-	CHECK(v.state == GCS_VERIFY);
++	guncal_tick(&v, t + 500);
++	CHECK(v.state == GCS_VERIFY);                      // measured in the flash, no button there
+ 	guncal_report(&v, 400, 100, 1, t + 1000);
+ 	guncal_tick(&v, t + 1000 + GUNCAL_HOLD_MS);
+ 	CHECK(v.state == GCS_AIM && v.point == 0);
+-- 
+2.53.0.windows.1
+

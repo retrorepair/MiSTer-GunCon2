@@ -1,0 +1,234 @@
+From 9192c4e7a5e7a82a30ecbc925a88a27a3ae35148 Mon Sep 17 00:00:00 2001
+From: retrorepair <joelwhybrow@googlemail.com>
+Date: Fri, 23 Oct 2026 01:11:23 +0100
+Subject: [PATCH 23/23] input: CRT lightgun mode 1 - a shot is only where the gun saw
+ the game's flash
+
+On a trigger pull the trigger still goes to the core at once (the game flashes
+because of it), but the aim no longer takes the tracker's estimate from before
+the pull. It goes off the screen, as a light gun's latch does at the start of
+every shot: nothing has been seen for this shot yet. The first valid reading
+after the pull (the game's flash) is the shot, and later readings in the window
+(the scene after the flash) no longer move it through a median. No light within
+LIGHTGUN_CRT_SHOT_MS of the pull leaves the shot off the screen, a reload.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lightgun_crt.cpp           | 35 +++++++--------------------
+ lightgun_crt.h             | 18 +++++++-------
+ test/lightgun_crt_test.cpp | 48 +++++++++++++++++++++++++-------------
+ 3 files changed, 48 insertions(+), 53 deletions(-)
+
+diff --git a/lightgun_crt.cpp b/lightgun_crt.cpp
+index f607427..66f92fe 100644
+--- a/lightgun_crt.cpp
++++ b/lightgun_crt.cpp
+@@ -39,21 +39,6 @@ static bool is_interior(const crtgun_state *s, const crtgun_params *p)
+ 
+ static void update_rules(crtgun_state *s, const crtgun_params *p, uint32_t now_ms);
+ 
+-static int32_t median3(const int32_t *v, int n)
+-{
+-	int32_t t[CRTGUN_FLASH_N] = {};
+-	if (n < 1) return 0;
+-	for (int i = 0; i < n; i++) t[i] = v[i];
+-	for (int i = 1; i < n; i++)
+-	{
+-		int32_t k = t[i];
+-		int j = i - 1;
+-		while (j >= 0 && t[j] > k) { t[j + 1] = t[j]; j--; }
+-		t[j + 1] = k;
+-	}
+-	return t[n / 2];
+-}
+-
+ // the value to give the core, from the rules' estimate and, in mode 1, the held aim
+ static void publish(crtgun_state *s, const crtgun_params *p, uint32_t now_ms)
+ {
+@@ -82,15 +67,13 @@ void crtgun_set_trigger(crtgun_state *s, bool down, uint32_t now_ms, const crtgu
+ {
+ 	if (down && !s->trig && p->mode == 1)
+ 	{
+-		// the rules' best estimate at this instant is the aim until the flash arrives
+-		update_rules(s, p, now_ms);
++		// Nothing is known about this shot until the gun sees the game's flash. Until then the gun has seen no light for it, which is
++		// what a light gun's latch says at the start of every shot: off the screen. Nothing seen before the pull is used. The flash
++		// sets the aim (crtgun_report); no flash in the window leaves the shot off the screen (a reload).
+ 		s->pub_init = true;
+-		s->pub_x = s->out_x;
+-		s->pub_y = s->out_y;
+-		s->pub_off = s->offscreen;
++		s->pub_off = true;
+ 		s->win_open = true;
+ 		s->win_t0 = now_ms;
+-		s->win_n = 0;
+ 	}
+ 
+ 	if (down && !s->trig)
+@@ -260,12 +243,10 @@ void crtgun_report(crtgun_state *s, const crtgun_params *p, uint32_t now_ms)
+ 
+ 	if (p->mode == 1 && s->win_open && crtgun_valid(s, p))
+ 	{
+-		s->win_x[s->win_n] = s->raw_x;
+-		s->win_y[s->win_n] = s->raw_y;
+-		s->win_n++;
+-		s->pub_x = median3(s->win_x, s->win_n);
+-		s->pub_y = median3(s->win_y, s->win_n);
++		// the gun has seen the game's flash: where it saw it is the shot, held until the next pull (later readings are the scene again)
++		s->pub_x = s->raw_x;
++		s->pub_y = s->raw_y;
+ 		s->pub_off = false;
+-		if (s->win_n >= CRTGUN_FLASH_N) s->win_open = false;     // the flash is in: hold it
++		s->win_open = false;
+ 	}
+ }
+diff --git a/lightgun_crt.h b/lightgun_crt.h
+index 77fc3b0..72668c1 100644
+--- a/lightgun_crt.h
++++ b/lightgun_crt.h
+@@ -25,10 +25,12 @@
+ // Two ways to hand a position to the core (params.mode):
+ //   0  follow the gun continuously, applying the rules above;
+ //   1  take the aim from the game's flash and hold it. The game flashes the screen after the trigger so the gun can
+-//      measure, and the readings during that flash are the clean ones; between shots the scene (mostly dark in many
+-//      games) makes the gun's readings wander or vanish. On a trigger pull the pointer is set to the rules' best
+-//      estimate at that instant, then to the median of the first CRTGUN_FLASH_N valid readings that follow (the
+-//      flash), and it then stays put until the next pull. A pull with no light and no flash stays offscreen.
++//      measure, and only what the gun sees in that flash is the shot; between shots the scene (mostly dark in many
++//      games) makes the gun's readings wander or vanish. On a trigger pull the trigger goes to the core at once (the
++//      game flashes because of it) and the aim goes off the screen: nothing has been seen for this shot yet, as a light
++//      gun's latch at the start of a shot. The first valid reading after the pull (the flash) is the aim, and it then
++//      stays put until the next pull. Nothing the gun saw before the pull is used. No light within shot_ms of the
++//      pull leaves the shot off the screen (a reload).
+ //
+ // No video or core knowledge is needed; times are in milliseconds and may wrap.
+ 
+@@ -44,8 +46,6 @@ struct crtgun_params
+ 	int32_t  beacon;        // 1: the core flashes the whole picture white when asked (see "Beacon" below); 0: it cannot
+ };
+ 
+-#define CRTGUN_FLASH_N 3   // valid readings after a pull that make up the flash measurement
+-
+ // Beacon. A CRT gun reads only where there is light: a dark enemy, or a dark patch of the picture, gives it nothing and the aim is lost,
+ // and the games' own flash is not a measurement (Virtua Cop's is a black frame). On the arcade cabinet a gun interface board in the video
+ // path supplies the light; here the CORE does, when the app asks: it shows the whole picture white for a few fields. On a trigger pull
+@@ -75,10 +75,8 @@ struct crtgun_state
+ 
+ 	// mode 1 (aim from the flash)
+ 	bool     pub_init;
+-	bool     win_open;      // collecting the flash measurement
++	bool     win_open;      // waiting for the flash after a pull
+ 	uint32_t win_t0;        // time of the pull
+-	int      win_n;
+-	int32_t  win_x[CRTGUN_FLASH_N], win_y[CRTGUN_FLASH_N];
+ 
+ 	// what to give the core: out_x/out_y in mode 0, the held aim in mode 1
+ 	int32_t  pub_x, pub_y;
+@@ -100,7 +98,7 @@ struct crtgun_state
+ };
+ 
+ #define CRTGUN_DEF_X_VALID_MIN 16
+-#define CRTGUN_DEF_SHOT_MS     400   // how long after a pull the flash is waited for
++#define CRTGUN_DEF_SHOT_MS     400   // how long after a pull the flash is waited for (mode 1: no light by then = off the screen)
+ #define CRTGUN_DEF_DARK_MS     500
+ #define CRTGUN_DEF_EDGE_PCT    12
+ #define CRTGUN_DEF_MODE        1
+diff --git a/test/lightgun_crt_test.cpp b/test/lightgun_crt_test.cpp
+index fb16894..a6e1d4a 100644
+--- a/test/lightgun_crt_test.cpp
++++ b/test/lightgun_crt_test.cpp
+@@ -173,19 +173,19 @@ static void test_flash_mode_holds_between_pulls()
+ 	CHECK(!r.s.pub_off && r.s.pub_x == (P1.xmin + P1.xmax) / 2);                                              // the scene does not move it
+ }
+ 
+-static void test_pull_with_light_takes_the_flash_readings()
++static void test_pull_aim_comes_only_from_the_flash()
+ {
+ 	Rig r(&P1);
+-	r.report(1000, 300, 100);
++	r.report(1000, 300, 100);                                                  // the scene before the pull: not used
+ 	r.trigger(1010, true);
+-	CHECK(!r.s.pub_off && r.s.pub_x == 300 && r.s.pub_y == 100);              // the best estimate at the instant of the pull
++	CHECK(r.s.pub_off);                                                        // nothing seen for this shot yet
+ 	r.report(1060, 0, 5);                                                      // the black frame
+-	CHECK(r.s.pub_x == 300);
+-	r.report(1100, 310, 102);                                                  // the flash
+-	CHECK(r.s.pub_x == 310 && r.s.pub_y == 102);
++	CHECK(r.s.pub_off);
++	r.report(1100, 310, 102);                                                  // the flash: this is the shot
++	CHECK(!r.s.pub_off && r.s.pub_x == 310 && r.s.pub_y == 102);
+ 	r.report(1117, 312, 103);
+ 	r.report(1133, 308, 101);
+-	CHECK(r.s.pub_x == 310 && r.s.pub_y == 102);                               // median of the first three
++	CHECK(r.s.pub_x == 310 && r.s.pub_y == 102);                               // later readings do not move it
+ 	r.report(1200, 400, 200);                                                  // the scene afterwards
+ 	CHECK(r.s.pub_x == 310 && r.s.pub_y == 102 && !r.s.pub_off);
+ }
+@@ -216,15 +216,29 @@ static void test_pull_with_no_flash_stays_offscreen()
+ 	CHECK(r.s.pub_off);
+ }
+ 
+-static void test_dark_interior_pull_holds_the_aim_until_the_flash()
++static void test_dark_interior_pull_waits_for_the_flash()
+ {
+ 	Rig r(&P1);
+ 	r.report(1000, 420, 135);                                                  // aiming mid-screen
+ 	r.report(1020, 0, 5);                                                      // scene went dark
+ 	r.trigger(1200, true);
+-	CHECK(!r.s.pub_off && r.s.pub_x == 420 && r.s.pub_y == 135);              // the interior hold carries the aim
++	CHECK(r.s.pub_off);                                                        // the last light before the pull is not the shot
+ 	r.report(1260, 424, 138);                                                  // flash
+-	CHECK(r.s.pub_x == 424 && r.s.pub_y == 138);
++	CHECK(!r.s.pub_off && r.s.pub_x == 424 && r.s.pub_y == 138);
++}
++
++// aimed mid-screen, then swung off the screen and pulled (a reload): the gun saw light a moment ago, but not in the flash
++static void test_reload_after_aiming_mid_screen()
++{
++	Rig r(&P1);
++	r.report(1000, 420, 135);
++	r.report(1020, 0, 5);                                                      // the light is gone (off the screen, or a dark frame)
++	r.trigger(1100, true);                                                     // well inside the old 500 ms interior hold
++	CHECK(r.s.pub_off);
++	for (int i = 0; i < 25; i++) r.report(1120 + i * 17, i & 1, 5);           // no light for 425 ms
++	CHECK(r.s.pub_off);
++	r.report(1600, 430, 140);                                                  // back on the screen after the window: still not a shot
++	CHECK(r.s.pub_off);
+ }
+ 
+ static void test_each_pull_restarts_the_measurement()
+@@ -234,12 +248,13 @@ static void test_each_pull_restarts_the_measurement()
+ 	r.trigger(1010, true);
+ 	r.report(1050, 300, 100); r.report(1067, 301, 100); r.report(1083, 299, 100);
+ 	r.trigger(1100, false);
+-	CHECK(r.s.pub_x == 300);
+-	r.report(1500, 500, 200);
++	CHECK(r.s.pub_x == 300 && r.s.pub_y == 100 && !r.s.pub_off);
++	r.report(1500, 500, 200);                                                  // the scene between shots does not move the aim
++	CHECK(r.s.pub_x == 300 && r.s.pub_y == 100 && !r.s.pub_off);
+ 	r.trigger(1510, true);
+-	CHECK(r.s.pub_x == 500 && r.s.pub_y == 200);
++	CHECK(r.s.pub_off);                                                        // a new shot: nothing seen for it yet
+ 	r.report(1560, 502, 201); r.report(1577, 498, 199); r.report(1593, 500, 200);
+-	CHECK(r.s.pub_x == 500 && r.s.pub_y == 200);
++	CHECK(!r.s.pub_off && r.s.pub_x == 502 && r.s.pub_y == 201);
+ }
+ 
+ // the kernel driver keeps only the low byte of Y: for a picture that reaches past line 255 a lit report in the wrapped lines is put back
+@@ -399,10 +414,11 @@ int main()
+ 	test_still_gun_loses_light_much_later();
+ 	test_time_wraparound();
+ 	test_flash_mode_holds_between_pulls();
+-	test_pull_with_light_takes_the_flash_readings();
++	test_pull_aim_comes_only_from_the_flash();
+ 	test_pull_in_the_dark_waits_for_the_flash();
+ 	test_pull_with_no_flash_stays_offscreen();
+-	test_dark_interior_pull_holds_the_aim_until_the_flash();
++	test_dark_interior_pull_waits_for_the_flash();
++	test_reload_after_aiming_mid_screen();
+ 	test_each_pull_restarts_the_measurement();
+ 	if (failures) { printf("%d check(s) failed\n", failures); return 1; }
+ 	printf("all lightgun_crt tests passed\n");
+-- 
+2.53.0.windows.1
+

@@ -71,6 +71,17 @@ framework does not measure: a small table (NB-1: HSync 32 px at 6.048 MHz, NES: 
 median of the first three complete valid reports after it (the flash), and it then holds until the next pull. A pull with no light and
 no flash stays offscreen. The core is given the held aim by `crtgun_deliver()` instead of the raw axes.
 
+`0023` (2026-10-23, the user's rule: a shot is registered only where the gun has seen the GAME's flash, in the app, never in a core) replaces
+the start of `0004`: on a pull the trigger still goes to the core at once (the game flashes because of it), but the aim goes off the screen,
+as a light gun's latch does at the start of a shot, instead of the tracker's estimate from before the pull. The first valid reading after the
+pull is the shot and later readings no longer move it; no light within `LIGHTGUN_CRT_SHOT_MS` (400) leaves it off the screen, a reload.
+Tried in House of the Dead the same night: the flash is one field, the gun reports it 33..35 ms after the pull, and the game has read the gun by then.
+
+`0024` the probe (the user's choice, for games like that; core name `Model2A`, `LIGHTGUN_CRT_PROBE=0` turns it off): on a pull the physical trigger
+is held back and the aim goes off the screen; a probe press makes the game flash (and count a reload); the first valid reading after it is where the
+gun saw that flash; the probe press goes up, the aim is set, and after 35 ms of trigger-up the real press is given with the aim in place. No light
+within 100 ms is the reload, and nothing more is sent. Costs: a reload every shot, two flashes, about 80 ms from the pull to the real press.
+
 **The GunCal core** (`cores/GunCal`, see `docs/CALIBRATION-CORE.md`): colour UI like the PS1 GunCon calibration screen (bright background,
 boxed prompts, blue ring target), the white flash, a check page with a live crosshair, and a monitor page with the raw readouts.
 
@@ -107,7 +118,7 @@ from the HPS gives every core the benefit with no FPGA change, and it worked for
   Mode 1 does not depend on it.
 - Mode 1 gives a stationary pointer between shots, so the core's own crosshair jumps at each shot. Games that track the gun continuously with
   their own flashes (every frame) would need `LIGHTGUN_CRT_MODE=0`.
-- Thresholds (valid X 16, edge 12%, dark 500 ms, flash window 400 ms, 3 flash readings) are educated guesses that worked on the one CRT tested.
+- Thresholds (valid X 16, edge 12%, dark 500 ms, flash window 400 ms) are educated guesses that worked on the one CRT tested.
 - The sync pulse widths of a core must be known to map it; an unknown core uses 4.7 us / 3 lines, which can shift the aim sideways by a few pixels.
 
 ## 7. Testing

@@ -34,6 +34,9 @@ the core's author as [alphanu1/sega-model2-mister#13](https://github.com/alphanu
   flash)**. Virtua Cop was played with an earlier build of this program that knew the Model 2 core by name. The program in this release finds
   the flash by the core's OSD line instead; it passes the host tests, but **it has not been run on the MiSTer with a core that has the line**,
   because no such core has been built yet. Cores without the line behave exactly as before.
+- **House of the Dead** (the Model 2A core, a build from the core's author, the `[15kHz CRT]` MRA; core unmodified): works with the probe
+  (patch 0024, below), "works" on 2026-10-23. Its flash is one field and the game reads the gun at the end of it, before the GunCon 2 can report
+  that field (the report arrives 33..35 ms after the pull), so the plain flash mode cannot give it the aim in time.
 - Every other core's mapping is derived from its measured video and its source, and **has not been tried with the gun**. See
   [docs/CORES.md](docs/CORES.md) for what is known per core and [docs/TESTING.md](docs/TESTING.md) for what to try first.
 - Games whose original gun was analog (Terminator 2, Jurassic Park, Alien3) never flash, so a CRT gun cannot work on them.
@@ -45,11 +48,12 @@ the core's author as [alphanu1/sega-model2-mister#13](https://github.com/alphanu
 2. Copy `GunCal.rbf` to `/media/fat/_Utility/`.
 3. Plug the GunCon 2 into the MiSTer's USB. Its video plug goes to the picture's **sync** (the yellow RCA plug must carry the picture's sync,
    as for any GunCon 2 on a CRT); the MiSTer must output 15 kHz video with composite sync (`MiSTer.ini`: `vga_scaler=0`, `composite_sync=1`).
-4. **Calibrate once.** Menu, Utility, **GunCal**. The calibration screen comes up at once (a saved calibration is replaced only when the five
-   shots are accepted). Shoot the centre ring, then the four corner crosses (the screen flashes white on each shot;
-   the D-pad on the gun moves the targets in or out if your set hides the edges). A shot with no light is refused ("MISSED"); shots that do
-   not lie on a line are refused ("BAD SHOTS"). After the fifth the fit is saved to `/media/fat/config/GUNCAL_uni_<vid>_<pid>_v1.cfg` and a
-   check page shows a live crosshair: press **A or B** on the gun to finish. Holding the trigger for 3 seconds redoes it.
+4. **Calibrate once.** Menu, Utility, **GunCal**. The calibration screen comes up at once and shows only the target: shoot the centre ring,
+   then the four corner crosses (the screen flashes white on each shot; the D-pad on the gun moves the targets in or out if your set hides the
+   edges). A shot with no light is refused ("MISSED - AGAIN"); shots that do not lie on a line are refused ("BAD SHOTS: REDO"). After the fifth a
+   check page shows a live crosshair and two boxes: shoot **EXIT** to save the calibration
+   (`/media/fat/config/GUNCAL_uni_<vid>_<pid>_v1.cfg`, once for the gun) and return to the menu, or **TRY AGAIN** to start over. Nothing is saved
+   before EXIT. Holding the trigger for 3 seconds also starts over.
 5. **Play.** Load any core and game. The first time, map the gun's buttons as you would a gamepad (OSD, Define joystick buttons): the trigger
    is the game's first button, for example. [docs/CORES.md](docs/CORES.md) lists a layout per core.
 
@@ -77,11 +81,17 @@ is part of this release**; the changes are proposed to the author in the two iss
 2. **Universal mapping.** For any other core MiSTer already measures the picture's width, where it starts after the sync pulse and how many
    lines it has; with the calibration that gives the gun's raw value at the core's picture edges. No per-core calibration. A per-core
    calibration file (the old F10 method), if one exists, still wins. A small table supplies each core's sync pulse widths.
-3. **Aim from the game's flash** (`LIGHTGUN_CRT_MODE=1`, the default). On a pull the pointer is set from the first valid readings that follow,
-   which is the game's flash, and it holds until the next pull. A shot with no light and no flash stays offscreen, so reload shots work.
+3. **Aim from the game's flash** (`LIGHTGUN_CRT_MODE=1`, the default). A shot is registered only where the gun has seen the game's flash: on a
+   pull the aim goes off the screen (nothing seen yet), the first valid reading after the pull is the shot, and it holds until the next pull.
+   No light within 400 ms leaves it off the screen, so reload shots work. Nothing the gun saw before the pull is used.
 4. **Beacon** (cores that announce it): the app holds the trigger back on a pull, asks the core for a white picture, measures, then gives the
    core the aim and the trigger together. [docs/DESIGN.md](docs/DESIGN.md) and the notes in the Model 2 repository's `docs/guncon2/` have the
    evidence and the contract for core authors.
+5. **Probe** (games that read their one-field flash before the gun can report it; House of the Dead, by the core's name `Model2A`): the app
+   holds the trigger back, sets the aim off the screen and gives the core a short probe press, so the game flashes (and counts a reload). Where
+   the gun sees that flash is the aim; the probe press goes up, the aim is set, and the real press follows with it in place. No light means the
+   gun is off the screen and the probe was the reload. You see two flashes and a reload with every shot, and the shot reaches the game about
+   80 ms after the pull (measured: probe press 3..8 ms, aim 47..52 ms, real press 79..84 ms after the pull).
 
 ## `MiSTer.ini` keys (all optional)
 
@@ -90,6 +100,7 @@ is part of this release**; the changes are proposed to the author in the two iss
 | `LIGHTGUN_CRT_TRACKER` | 1 | 0 restores the old 50 ms hold completely |
 | `LIGHTGUN_CRT_MODE` | 1 | 1 aim from the game's flash, 0 follow the gun continuously |
 | `LIGHTGUN_CRT_BEACON` | 1 | 0: never ask a core for the white flash |
+| `LIGHTGUN_CRT_PROBE` | 1 | 0: no probe press, even for the cores that get it (House of the Dead) |
 | `LIGHTGUN_CRT_SHOT_MS` | 400 | how long after a pull the flash is waited for |
 | `LIGHTGUN_CRT_X_VALID_MIN` | 16 | raw X below this means "no light" |
 | `LIGHTGUN_CRT_DARK_MS` | 500 | longest hold across a dark gap that began inside the screen |
@@ -100,16 +111,18 @@ Settings can go in a section named for a core or an MRA set (for example `[Model
 
 ## What is in this repo
 
-- `patches/` eighteen patches to `Main_MiSTer` commit 13f1de9, in order (`0001` trace, `0002` the tracker, `0003` GunCal support and the
+- `patches/` twenty-four patches to `Main_MiSTer` commit 13f1de9, in order (`0001` trace, `0002` the tracker, `0003` GunCal support and the
   universal mapping, `0004` aim from the flash, `0005`..`0013` timing log, interlaced cores, per-core sync table, gun windows, ... , `0014`
   tracker edges and the Model 2 inset, `0015` junk readings after a black frame, `0016` the tracker's decisions delivered on time, `0017` the
-  beacon, `0018` GunCal starts with the calibration screen). `patches/kernel/` is a one-line fix for the Linux driver (it keeps only the low byte of Y; the app compensates without it).
+  beacon, `0018` GunCal starts with the calibration screen, `0019` its TRY AGAIN / EXIT boxes, `0020` its title until the first shot, `0021` the
+  Model 2A core's sync sizes, `0022` the gun's D-pad works with the tracker, `0023` a shot only where the gun saw the flash, `0024` the probe). `patches/kernel/` is a one-line fix for the Linux driver (it keeps only the low byte of Y; the app compensates without it).
 - `cores/GunCal/` the calibration core (Quartus Lite 17.0; the framework `sys/` is fetched from Template_MiSTer at build time).
 - `scripts/` `build-main-mister.sh` (ARM build in WSL, runs the host unit tests, reproducible), `build-guncal.sh`, and the Quartus helpers.
 - `tools/mister/` helpers for the MiSTer's UART console and the analysis of gun traces (`GUNDBG=1` builds record every raw report).
 - `docs/` the calibration core, the design and its evidence, per-core notes, what to test. `HANDOFF.md` is the working log.
 - The [release](https://github.com/retrorepair/MiSTer-GunCon2/releases/latest) has just the two files you need: `MiSTer` (built by
-  `scripts/build-main-mister.sh` from the patches here) and `GunCal.rbf`.
+  `scripts/build-main-mister.sh` from the patches here) and `GunCal.rbf`. **The release is older than patches 0018..0024** (GunCal's new screens,
+  the D-pad fix, the flash-only shot, the probe): build from this repository for those.
 
 ## Build it yourself
 

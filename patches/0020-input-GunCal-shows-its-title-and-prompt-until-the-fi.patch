@@ -1,0 +1,115 @@
+From bf3a07ab123c243edc7e2097bf719be3af20fd41 Mon Sep 17 00:00:00 2001
+From: retrorepair <joelwhybrow@googlemail.com>
+Date: Fri, 23 Oct 2026 00:21:18 +0100
+Subject: [PATCH 20/21] input: GunCal shows its title and prompt until the first
+ shot, then only the targets
+
+Like a console game's own GunCon calibration, GunCal starts with a title banner and the prompt "aim and shoot at the center of the screen" next to
+the first target. They go at the first pull, so while the points are asked for nothing but the target is drawn, and the check page has only its
+two boxes. TRY AGAIN and a restart by holding the trigger bring the prompt back. The state is bit 29 of the word sent to the core.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ guncal.cpp           | 5 +++++
+ guncal.h             | 3 ++-
+ test/guncal_test.cpp | 9 ++++++++-
+ 3 files changed, 15 insertions(+), 2 deletions(-)
+
+diff --git a/guncal.cpp b/guncal.cpp
+index 71ec598..393f45c 100644
+--- a/guncal.cpp
++++ b/guncal.cpp
+@@ -158,6 +158,7 @@ void guncal_init(guncal_sm *s, const guncal_fit *stored, int margin_pct)
+ 	{
+ 		s->state = GCS_AIM;
+ 		s->point = 0;
++		s->intro = 1;
+ 	}
+ }
+ 
+@@ -192,6 +193,7 @@ void guncal_report(guncal_sm *s, int x, int y, int trig, uint32_t now_ms)
+ 		s->hold_fired = 0;
+ 		if (s->state == GCS_AIM || (s->state == GCS_VERIFY && s->fit.valid))
+ 		{
++			s->intro = 0;                    // the first pull ends the prompt: from here on only the targets are drawn
+ 			s->state = (s->state == GCS_AIM) ? GCS_COLLECT : GCS_VCOLLECT;   // either way the screen flashes and the readings in it are the aim
+ 			s->t_press = now_ms;
+ 			s->n = 0;
+@@ -273,6 +275,7 @@ void guncal_tick(guncal_sm *s, uint32_t now_ms)
+ 			{
+ 				s->state = GCS_AIM;
+ 				s->point = 0;
++				s->intro = 1;
+ 				s->msg = GUNCAL_MSG_NONE;
+ 			}
+ 		}
+@@ -283,6 +286,7 @@ void guncal_tick(guncal_sm *s, uint32_t now_ms)
+ 		s->hold_fired = 1;
+ 		s->state = GCS_AIM;
+ 		s->point = 0;
++		s->intro = 1;
+ 		s->msg = GUNCAL_MSG_NONE;
+ 	}
+ }
+@@ -292,6 +296,7 @@ uint32_t guncal_cmd_word(const guncal_sm *s)
+ 	int check = (s->state == GCS_VERIFY || s->state == GCS_VCOLLECT);
+ 	uint32_t page = (s->state == GCS_MONITOR) ? GUNCAL_PAGE_MONITOR : check ? GUNCAL_PAGE_VERIFY : GUNCAL_PAGE_CAL;
+ 	uint32_t w = page | ((uint32_t)(s->point & 15) << 2) | ((uint32_t)(s->flash_seq & 3) << 6) | ((uint32_t)(s->msg & 3) << 8);
++	if (s->intro && s->state == GCS_AIM && s->point == 0) w |= 1u << 29;
+ 
+ 	if ((s->state == GCS_MONITOR || check) && s->fit.valid && s->rawx >= GUNCAL_VALID_X)
+ 	{
+diff --git a/guncal.h b/guncal.h
+index 30b082a..4ffe505 100644
+--- a/guncal.h
++++ b/guncal.h
+@@ -136,6 +136,7 @@ struct guncal_sm
+ 	guncal_fit fit;
+ 	int      saved;                              // the fit is accepted: the caller stores it (and logs it)
+ 	int      exit_req;                           // EXIT (or A): the caller leaves the core once it has stored the fit
++	int      intro;                              // the first target is up and nothing has been shot yet: the core shows its title and prompt, which go at the first pull
+ 	int      shot_done;                          // a shot just finished: shot_point/shot_n/shot_ok describe it (caller clears)
+ 	int      shot_point, shot_n, shot_ok;
+ };
+@@ -149,7 +150,7 @@ uint32_t guncal_cmd_word(const guncal_sm *s);
+ 
+ // Words sent to the core (the check page's pointer is shown on the monitor page and while a check shot is measured too):
+ //   joystick_4 (guncal_cmd_word): [1:0] page  [5:2] target  [7:6] flash sequence  [9:8] message  [10] pointer valid
+-//                                 [20:11] pointer x (core px)  [28:21] pointer y (core px)
++//                                 [20:11] pointer x (core px)  [28:21] pointer y (core px)  [29] intro: show the title and the prompt
+ //   joystick_3 (guncal_target_word): [9:0] target x  [17:10] target y  [21:18] number of targets   (core px)
+ //   joystick_5 (guncal_raw_word): [11:0] X  [23:12] Y  [24] trigger   (the gun's raw report)
+ uint32_t guncal_target_word(const guncal_sm *s);
+diff --git a/test/guncal_test.cpp b/test/guncal_test.cpp
+index 4640065..e8dd43a 100644
+--- a/test/guncal_test.cpp
++++ b/test/guncal_test.cpp
+@@ -125,9 +125,15 @@ static void test_full_sequence()
+ 	guncal_init(&s, NULL, 12);
+ 	CHECK(s.state == GCS_AIM && s.point == 0);
+ 	CHECK((guncal_cmd_word(&s) & 3) == GUNCAL_PAGE_CAL);
++	CHECK((guncal_cmd_word(&s) >> 29) & 1);                              // the title and the prompt, until the first pull
+ 	CHECK(((guncal_target_word(&s) >> 18) & 15) == GUNCAL_NPOINTS);
+ 	uint32_t t = 1000;
+-	for (int k = 0; k < GUNCAL_NPOINTS - 1; k++) { shoot(&s, &t, 1); CHECK(s.point == k + 1 && s.state == GCS_AIM); }
++	for (int k = 0; k < GUNCAL_NPOINTS - 1; k++)
++	{
++		shoot(&s, &t, 1);
++		CHECK(s.point == k + 1 && s.state == GCS_AIM);
++		CHECK(!((guncal_cmd_word(&s) >> 29) & 1));                       // then only the targets are drawn
++	}
+ 	shoot(&s, &t, 1);
+ 	CHECK(s.state == GCS_VERIFY && s.fit.valid && !s.saved && !s.exit_req);    // nothing is kept before EXIT
+ 	CHECK((guncal_cmd_word(&s) & 3) == GUNCAL_PAGE_VERIFY);
+@@ -161,6 +167,7 @@ static void test_full_sequence()
+ 		guncal_sm r = s, e = s, n = s, d = s;
+ 		shoot_at(&r, &t2, 150, 184, 1);
+ 		CHECK(r.state == GCS_AIM && r.point == 0 && !r.saved && !r.exit_req);   // TRY AGAIN
++		CHECK((guncal_cmd_word(&r) >> 29) & 1);                                 // ... starts with the prompt again
+ 		shoot_at(&e, &t2, 375, 184, 1);
+ 		CHECK(e.saved && e.exit_req);                                           // EXIT: kept, and the caller leaves
+ 		shoot_at(&n, &t2, 264, 120, 1);
+-- 
+2.53.0.windows.1
+
+

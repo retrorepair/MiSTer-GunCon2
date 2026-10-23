@@ -1,7 +1,7 @@
 # GunCal: the GunCon 2 calibration and monitor core
 
-A MiSTer FPGA core (`cores/GunCal`) that gives the gun a clean 15 kHz picture, walks you through a PS1-style calibration, and then
-shows live where the gun thinks it is pointing. The calibration it produces is made once, for the gun and your display, and is applied
+A MiSTer FPGA core (`cores/GunCal`) that gives the gun a clean 15 kHz picture and walks you through a PS1-style calibration (and has a
+monitor page that shows live where the gun thinks it is pointing). The calibration it produces is made once, for the gun and your display, and is applied
 to every other core automatically from that core's measured video timing.
 
 ## Why a core, and why one calibration can serve every core
@@ -20,18 +20,23 @@ only where you actually shot. Hidden edges are reached by extrapolating the line
 ## The calibration (the PS1 GunCon screen's look)
 
 Loading the core starts the calibration at once, as a console game's own GunCon calibration does (an earlier version came up on the monitor page
-when a calibration was already saved, and the calibration was only reached by holding the trigger for 3 seconds). A saved calibration is replaced
-only when the five shots are accepted.
+when a calibration was already saved, and the calibration was only reached by holding the trigger for 3 seconds).
 
-Bright yellow-green background (so the gun always has light), a navy title box, olive prompt boxes with a cyan border, a blue ring
-target. Five targets are shot in turn: the centre, then the four corners. On each trigger pull the screen flashes white for about 100 ms
-and the first valid reports of the flash are the measurement (median of the reports in the next 300 ms). A shot with no light is
-refused ("MISSED - TRY AGAIN"); shots that do not lie on a line are refused ("BAD SHOTS - START OVER"). After the fifth shot the fit is
-saved (`/media/fat/config/GUNCAL_uni_<vid>_<pid>_v1.cfg`, once for the gun) and a log line per point is appended to
-`config/GUNCAL_log.txt` (target, raw reading, residual).
+A bright yellow screen (so the gun always has light) and one blue ring with a plus and ticks, round on a 4:3 tube. **While a target is asked for
+there is nothing else on the screen**, so a target is never covered. Five targets are shot in turn: the centre, then the four corners. On each
+trigger pull the screen flashes white for about 100 ms and the first valid reports of the flash are the measurement (median of the reports in
+the next 300 ms): the shot counts only once the gun has seen the flash. A shot with no light is refused (a navy strip at the top says
+"MISSED - AGAIN"; no target can reach that strip); shots that do not lie on a line are refused ("BAD SHOTS: REDO") and the sequence starts again.
+Every shot is logged in `config/GUNCAL_log.txt` (target, raw reading, residual) when the calibration is kept.
 
-Then the **check page**: "IS THE GUN SIGHT ALIGNED?", a ring in the middle and a black crosshair that follows the gun. **A or B** on the
-gun ends it (monitor page). Holding the trigger for 3 seconds redoes the calibration at any time.
+Then the **check page**: a ring in the middle and a black crosshair that follows the gun, and two white boxes, **TRY AGAIN** and **EXIT**.
+Shoot a box: the screen flashes white and the gun's readings in the flash are tested against the boxes, as for a calibration shot (the box under
+the crosshair turns green). **EXIT saves the calibration** (`/media/fat/config/GUNCAL_uni_<vid>_<pid>_v1.cfg`, once for the gun) **and leaves
+GunCal for the menu**; TRY AGAIN starts over; nothing is saved before EXIT, so a calibration you walk away from does not replace the old one.
+On the gun, A does what EXIT does; B saves and shows the monitor page. Holding the trigger for 3 seconds redoes the calibration at any time.
+
+The picture is 480i: two fields of 240 lines (the second field's VSync half a line early), both showing the same 529 x 240 picture, so every
+line is drawn twice, a row apart, and the CRT shows a filled picture. The gun counts lines per field, so its Y is as in a 240 line picture.
 
 ## The monitor page
 

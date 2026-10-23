@@ -25,7 +25,8 @@ assign {SDRAM_DQ, SDRAM_A, SDRAM_BA, SDRAM_CLK, SDRAM_CKE, SDRAM_DQML, SDRAM_DQM
 assign {DDRAM_CLK, DDRAM_BURSTCNT, DDRAM_ADDR, DDRAM_DIN, DDRAM_BE, DDRAM_RD, DDRAM_WE} = '0;
 
 assign VGA_SL = 0;
-assign VGA_F1 = 0;
+wire        field;                                          // interlaced: which field is on (see rtl/guncal.v)
+assign VGA_F1 = field;
 assign VGA_SCALER  = 0;
 assign VGA_DISABLE = 0;
 assign HDMI_FREEZE = 0;
@@ -136,6 +137,7 @@ guncal guncal
 	.HSync(HSync),
 	.VBlank(VBlank),
 	.VSync(VSync),
+	.field_out(field),
 
 	.rgb(rgb)
 );
